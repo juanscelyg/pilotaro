@@ -1,0 +1,173 @@
+<?xml version="1.0"?>
+<!--
+  Copyright 2026 Juan S. Cely G.
+  Licensed under the Apache License, Version 2.0
+
+  Blue Robotics BlueROV2 (standard, 6 thrusters) for pilotaro, with its sensors (IMU,
+  magnetometer, front camera, Ping echosounder used as altimeter), T200 thrusters,
+  buoyancy, hydrodynamics and ground truth odometry for Gazebo Harmonic. It needs a world
+  with water: the Buoyancy system (pilotaro_gazebo/worlds/underwater.sdf).
+
+  Sources:
+    - Rigid body (mass 10 kg, inertia, center of mass), thruster positions, orientations and
+      spin directions, T200 thrust coefficient: bluerov2_gz, C. McQueen, MIT
+      (https://github.com/clydemcqueen/bluerov2_gz, models/bluerov2).
+    - Hydrodynamics: added mass, linear and quadratic damping identified for the BlueROV2
+      (Heavy, same hull), and net buoyancy B - W = 2 N: C.-J. Wu, "6-DoF Modelling and
+      Control of a Remotely Operated Vehicle", Flinders University, 2018, tables 5.1-5.3.
+    - Thrust limit: 40 N both ways (T200 at 16 V, Wu 2018). The T200 gives more forward than
+      reverse (+49.98 / -40.18 N in bluerov_ros_playground); the reverse value is used for
+      both so the allocation stays symmetric.
+    - Visual: mesh of bluerov_ros_playground, P. J. Pereira, Blue Robotics, LGPL v3
+      (https://github.com/patrickelectric/bluerov_ros_playground, model/BlueRov2.dae),
+      rotated to this frame and decimated: meshes/bluerov2 (see its README.md). It also
+      confirms the geometry above: overall 0.457 x 0.344 x 0.254 m, and thruster moment arms
+      of 0.167 m in yaw and 0.111 m in roll (0.164 and 0.109 m here).
+
+  Buoyancy: the volume of the collisions of base_link times the water density. The main box
+  is sized so that, with the two skids, the buoyancy is the weight plus 2 N; its center (the
+  center of buoyancy) is 4.4 cm above the center of mass, which keeps roll and pitch stable
+  (pitch is not actuated with 6 thrusters).
+
+  This file is the single source of the vehicle: Gazebo uses it directly and
+  scripts/update_vehicle_params.py copies mass, inertia and thruster geometry into
+  config/bluerov2.params.yaml.
+
+  Arguments:
+    name     robot name, unique in a multirobot system. Prefix of every topic (/<name>/...)
+             and frame (<name>/...), and namespace of the thrusters.
+    cameras  add the front camera (rendering is expensive with many robots).
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="bluerov2">
+
+  <xacro:include filename="common.xacro"/>
+
+  <xacro:arg name="name" default="bluerov2"/>
+  <xacro:arg name="cameras" default="true"/>
+  <xacro:property name="name" value="$(arg name)"/>
+
+  <!-- Rigid body -->
+  <xacro:property name="body_mass" value="10.0"/>
+  <xacro:property name="thruster_mass" value="0.002"/>
+  <xacro:property name="com_z" value="0.011"/>
+
+  <!-- Buoyancy: water density, gravity and net buoyancy (B - W) -->
+  <xacro:property name="water_density" value="1000.0"/>
+  <xacro:property name="gravity" value="9.8"/>
+  <xacro:property name="net_buoyancy" value="2.0"/>
+  <xacro:property name="total_mass" value="${body_mass + 6 * thruster_mass}"/>
+  <xacro:property name="volume"
+                  value="${(total_mass * gravity + net_buoyancy) / (water_density * gravity)}"/>
+  <!-- Skids: 2 x (0.40 x 0.02 x 0.02) m -->
+  <xacro:property name="skid_volume" value="${2 * 0.40 * 0.02 * 0.02}"/>
+  <xacro:property name="box_x" value="0.457"/>
+  <xacro:property name="box_y" value="0.338"/>
+  <xacro:property name="box_z" value="${(volume - skid_volume) / (box_x * box_y)}"/>
+  <xacro:property name="box_center_z" value="0.06"/>
+
+  <!-- T200 thruster -->
+  <xacro:property name="thruster" value="${dict(
+    thrust_coefficient=0.02, fluid_density=water_density, propeller_diameter=0.1,
+    max_thrust=40.0)}"/>
+
+  <!-- Hydrodynamics (Wu 2018) -->
+  <xacro:property name="hydro" value="${dict(water_density=water_density,
+    xDotU=-5.5, yDotV=-12.7, zDotW=-14.57, kDotP=-0.12, mDotQ=-0.12, nDotR=-0.12,
+    xU=-4.03, yV=-6.22, zW=-5.18, kP=-0.07, mQ=-0.07, nR=-0.07,
+    xUabsU=-18.18, yVabsV=-21.66, zWabsW=-36.99, kPabsP=-1.55, mQabsQ=-1.55, nRabsR=-1.55)}"/>
+
+  <!-- ============================== Frame ============================== -->
+
+  <!-- base_link has no inertia (KDL does not support it in the root link); the mass is in
+       base_inertia, which Gazebo merges into base_link. Its collisions are the volume that
+       displaces water -->
+  <link name="base_link">
+    <!-- Mesh in the base_link frame (meshes/bluerov2/README.md). The thrusters have no
+         visual of their own: their propellers are in the mesh -->
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="file://$(find pilotaro_description)/meshes/bluerov2/bluerov2.glb"/>
+      </geometry>
+    </visual>
+
+    <collision name="buoyancy">
+      <origin xyz="0 0 ${box_center_z}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${box_x} ${box_y} ${box_z}"/>
+      </geometry>
+    </collision>
+    <collision name="skid_left">
+      <origin xyz="0 0.15 -0.10" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.40 0.02 0.02"/>
+      </geometry>
+    </collision>
+    <collision name="skid_right">
+      <origin xyz="0 -0.15 -0.10" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.40 0.02 0.02"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="base_inertia">
+    <inertial>
+      <origin xyz="0 0 ${com_z}" rpy="0 0 0"/>
+      <mass value="${body_mass}"/>
+      <inertia ixx="0.099" ixy="0" ixz="0" iyy="0.178" iyz="0" izz="0.269"/>
+    </inertial>
+  </link>
+  <joint name="base_inertia_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="base_inertia"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <xacro:pilotaro_hydrodynamics link="base_link" hydro="${hydro}"/>
+
+  <!-- ============================== Thrusters ============================== -->
+
+  <xacro:macro name="t200" params="index x y z roll pitch yaw direction">
+    <xacro:pilotaro_thruster robot="${name}" index="${index}" x="${x}" y="${y}" z="${z}"
+                             roll="${roll}" pitch="${pitch}" yaw="${yaw}"
+                             direction="${direction}" thruster="${thruster}">
+      <visuals/>
+    </xacro:pilotaro_thruster>
+  </xacro:macro>
+
+  <!-- ArduSub "vectored" frame. Horizontal thrusters at 45 deg (a positive thrust of the
+       front ones pushes backwards and out, of the rear ones forwards and out); vertical
+       thrusters push down. The rear thrusters spin the other way (cw propellers) -->
+  <xacro:t200 index="0" x="0.14" y="-0.092" z="0.0" roll="0" pitch="${pi / 2}"
+              yaw="${-3 * pi / 4}" direction="1"/>
+  <xacro:t200 index="1" x="0.14" y="0.092" z="0.0" roll="0" pitch="${pi / 2}"
+              yaw="${3 * pi / 4}" direction="1"/>
+  <xacro:t200 index="2" x="-0.14" y="-0.092" z="0.0" roll="0" pitch="${pi / 2}"
+              yaw="${-pi / 4}" direction="-1"/>
+  <xacro:t200 index="3" x="-0.14" y="0.092" z="0.0" roll="0" pitch="${pi / 2}"
+              yaw="${pi / 4}" direction="-1"/>
+  <xacro:t200 index="4" x="0.0" y="-0.109" z="0.077" roll="${pi}" pitch="0" yaw="0"
+              direction="1"/>
+  <xacro:t200 index="5" x="0.0" y="0.109" z="0.077" roll="${pi}" pitch="0" yaw="0"
+              direction="1"/>
+
+  <!-- ============================== Sensors ============================== -->
+
+  <xacro:pilotaro_imu robot="${name}" rate="250"/>
+  <xacro:pilotaro_magnetometer robot="${name}" rate="50"/>
+
+  <!-- Blue Robotics Ping echosounder looking down: distance to the bottom, 0.3 to 30 m -->
+  <xacro:pilotaro_rangefinder robot="${name}" prefix="sonar" x="0.10" y="0.0" z="-0.10"
+                              range_min="0.3" range_max="30.0" rate="10"/>
+
+  <xacro:if value="$(arg cameras)">
+    <!-- Low-light HD camera inside the front of the electronics enclosure -->
+    <xacro:pilotaro_camera robot="${name}" prefix="camera_front" x="0.18" y="0" z="0.04"
+                           roll="0" pitch="0" width="1280" height="720" hfov="1.39"
+                           rate="30"/>
+  </xacro:if>
+
+  <xacro:pilotaro_odometry robot="${name}" rate="250"/>
+
+</robot>

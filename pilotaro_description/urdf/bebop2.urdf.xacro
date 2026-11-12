@@ -1,0 +1,147 @@
+<?xml version="1.0"?>
+<!--
+  Copyright 2026 Juan S. Cely G.
+  Licensed under the Apache License, Version 2.0
+
+  Parrot Bebop 2 quadrotor for pilotaro, with its sensors (IMU, barometer, magnetometer, GPS,
+  front camera, vertical camera and ultrasonic altimeter), rotor motor models and ground
+  truth odometry for Gazebo Harmonic.
+
+  Sources:
+    - Mass, inertia, propeller positions and meshes: "Parrot Bebop 2" model of Open Robotics
+      (https://app.gazebosim.org/OpenRobotics/fuel/models/Parrot%20Bebop%202, CC0). Meshes are
+      fetched from Fuel (internet is needed the first time).
+    - Rotor thrust, torque and drag coefficients: aerodynamic model identified from Bebop 2
+      flight and wind tunnel data, S. Sun, C. C. de Visser, Q. Chu, "Quadrotor gray-box model
+      identification from high-speed flight data", J. Aircraft 2019 / RA-L 2019
+      (https://bitbucket.org/SihaoSun/bebop2_aerodynamic_model): static Ct0 and Cq0 with
+      R = 0.075 m and rho = 1.225 kg/m^3 give motor_constant = 1.90e-6 N/(rad/s)^2 and
+      moment_constant = 0.0109 m (hover ~ 810 rad/s, ~ 7700 rpm).
+    - Rotor order and directions: Parrot (front right ccw, front left cw, rear left ccw,
+      rear right cw), as in BebopS (G. Silano, Apache 2.0).
+    - max_rot_velocity: 1250 rad/s (~ 12000 rpm), thrust to weight ~ 2.4.
+
+  This file is the single source of the vehicle: Gazebo uses it directly and
+  scripts/update_vehicle_params.py copies mass, inertia, rotor geometry and motor constants
+  into config/bebop2.params.yaml.
+
+  Arguments:
+    name     robot name, unique in a multirobot system. Prefix of every topic (/<name>/...)
+             and frame (<name>/...), and namespace of the motor models.
+    cameras  add the front and vertical cameras (rendering is expensive with many robots).
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="bebop2">
+
+  <xacro:include filename="common.xacro"/>
+
+  <xacro:arg name="name" default="bebop2"/>
+  <xacro:arg name="cameras" default="true"/>
+  <xacro:property name="name" value="$(arg name)"/>
+
+  <xacro:property name="mesh_uri"
+                  value="https://fuel.gazebosim.org/1.0/OpenRobotics/models/Parrot%20Bebop%202/3/files/meshes"/>
+
+  <!-- Total mass 0.503 kg: frame + 4 propellers -->
+  <xacro:property name="rotor_mass" value="0.003"/>
+  <xacro:property name="body_mass" value="${0.503 - 4 * rotor_mass}"/>
+
+  <!-- Propeller: radius 0.075 m, modelled as a 0.15 x 0.012 x 0.004 m box -->
+  <xacro:property name="prop_length" value="0.15"/>
+  <xacro:property name="prop_width" value="0.012"/>
+  <xacro:property name="prop_height" value="0.004"/>
+
+  <!-- Motors (MulticopterMotorModel) -->
+  <xacro:property name="motor" value="${dict(
+    motor_constant=1.9006e-06, moment_constant=0.010891, max_rot_velocity=1250.0,
+    time_constant_up=0.0125, time_constant_down=0.025,
+    rotor_drag_coefficient=3.96215e-05, rolling_moment_coefficient=4.64449e-06)}"/>
+
+  <!-- ============================== Frame ============================== -->
+
+  <!-- base_link has no inertia (KDL does not support it in the root link); the frame mass
+       is in base_inertia, which Gazebo merges into base_link -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="${mesh_uri}/hull.dae"/>
+      </geometry>
+    </visual>
+    <collision name="body">
+      <origin xyz="-0.00424 0.00014 -0.00595" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.316618 0.330564 0.089582"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="base_inertia">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${body_mass}"/>
+      <inertia ixx="1.805e-3" ixy="-8.619e-7" ixz="1.555e-5"
+               iyy="1.764e-3" iyz="3.595e-7" izz="3.328e-3"/>
+    </inertial>
+  </link>
+  <joint name="base_inertia_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="base_inertia"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="base_link">
+    <minDepth>0.001</minDepth>
+    <maxVel>0</maxVel>
+  </gazebo>
+
+  <!-- ============================== Rotors ============================== -->
+
+  <!-- position: fr, fl, rl, rr (name of the propeller mesh) -->
+  <xacro:macro name="bebop2_rotor" params="index x y position direction">
+    <xacro:pilotaro_rotor robot="${name}" index="${index}" x="${x}" y="${y}" z="-0.00501"
+                          direction="${direction}" mass="${rotor_mass}"
+                          ixx="${rotor_mass * (prop_width ** 2 + prop_height ** 2) / 12.0}"
+                          iyy="${rotor_mass * (prop_length ** 2 + prop_height ** 2) / 12.0}"
+                          izz="${rotor_mass * (prop_length ** 2 + prop_width ** 2) / 12.0}"
+                          length="${prop_length}" width="${prop_width}" motor="${motor}">
+      <visuals>
+        <visual>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry>
+            <mesh filename="${mesh_uri}/propeller_${position}.dae"/>
+          </geometry>
+        </visual>
+      </visuals>
+    </xacro:pilotaro_rotor>
+  </xacro:macro>
+
+  <!-- Parrot order: front right, front left, rear left, rear right -->
+  <xacro:bebop2_rotor index="0" x="0.08456" y="-0.11435" position="fr" direction="ccw"/>
+  <xacro:bebop2_rotor index="1" x="0.08456" y="0.11463" position="fl" direction="cw"/>
+  <xacro:bebop2_rotor index="2" x="-0.09035" y="0.11452" position="rl" direction="ccw"/>
+  <xacro:bebop2_rotor index="3" x="-0.09035" y="-0.11423" position="rr" direction="cw"/>
+
+  <!-- ============================== Sensors ============================== -->
+
+  <xacro:pilotaro_imu robot="${name}" rate="250"/>
+  <xacro:pilotaro_air_pressure robot="${name}" rate="50"/>
+  <xacro:pilotaro_magnetometer robot="${name}" rate="50"/>
+  <xacro:pilotaro_navsat robot="${name}" rate="10"/>
+
+  <!-- Ultrasonic altimeter, up to 8 m -->
+  <xacro:pilotaro_rangefinder robot="${name}" prefix="sonar" x="0.0" y="0.0" z="-0.046"
+                              range_min="0.25" range_max="8.0" rate="30"/>
+
+  <xacro:if value="$(arg cameras)">
+    <!-- Front camera: stabilized 1280x720 stream, about 80 deg of horizontal field of view.
+         Vertical camera: 320x240 optical flow camera -->
+    <xacro:pilotaro_camera robot="${name}" prefix="camera_front" x="0.11" y="0" z="0.0"
+                           roll="0" pitch="0" width="1280" height="720" hfov="1.3963" rate="30"/>
+    <xacro:pilotaro_camera robot="${name}" prefix="camera_down" x="0.0" y="0" z="-0.046"
+                           roll="0" pitch="${pi / 2}" width="320" height="240" hfov="1.1170"
+                           rate="30"/>
+  </xacro:if>
+
+  <xacro:pilotaro_odometry robot="${name}" rate="250"/>
+
+</robot>

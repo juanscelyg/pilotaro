@@ -1,0 +1,177 @@
+<?xml version="1.0"?>
+<!--
+  Copyright 2026 Juan S. Cely G.
+  Licensed under the Apache License, Version 2.0
+
+  Holybro X500 quadrotor for pilotaro, with its sensors (IMU, barometer, magnetometer, GPS,
+  front and downward cameras), rotor motor models and ground truth odometry for Gazebo
+  Harmonic.
+
+  Geometry, masses and motor constants come from the PX4 x500 model
+  (https://app.gazebosim.org/PX4/fuel/models/x500, CC-BY 4.0, Benjamin Perseghetti);
+  its meshes are fetched from Fuel (internet is needed the first time).
+
+  This file is the single source of the vehicle: Gazebo uses it directly and
+  scripts/update_vehicle_params.py copies mass, inertia, rotor geometry and motor constants
+  into config/x500.params.yaml.
+
+  Arguments:
+    name     robot name, unique in a multirobot system. Prefix of every topic (/<name>/...)
+             and frame (<name>/...), and namespace of the motor models.
+    cameras  add the front and downward cameras (rendering is expensive with many robots).
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="x500">
+
+  <xacro:include filename="common.xacro"/>
+
+  <xacro:arg name="name" default="x500"/>
+  <xacro:arg name="cameras" default="true"/>
+  <xacro:property name="name" value="$(arg name)"/>
+
+  <xacro:property name="mesh_uri" value="https://fuel.gazebosim.org/1.0/PX4/models/x500/3/files/meshes"/>
+
+  <!-- Frame -->
+  <xacro:property name="body_mass" value="2.0"/>
+  <xacro:property name="body_ixx" value="0.02166666666666667"/>
+  <xacro:property name="body_iyy" value="0.02166666666666667"/>
+  <xacro:property name="body_izz" value="0.04000000000000001"/>
+
+  <!-- Rotors: arm length along x and y, height over base_link -->
+  <xacro:property name="arm" value="0.174"/>
+  <xacro:property name="rotor_z" value="0.06"/>
+
+  <!-- Motors (MulticopterMotorModel) -->
+  <xacro:property name="motor" value="${dict(
+    motor_constant=8.54858e-06, moment_constant=0.016, max_rot_velocity=1000.0,
+    time_constant_up=0.0125, time_constant_down=0.025,
+    rotor_drag_coefficient=8.06428e-05, rolling_moment_coefficient=1e-06)}"/>
+
+  <!-- ============================== Frame ============================== -->
+
+  <xacro:macro name="motor_base" params="x y">
+    <visual>
+      <origin xyz="${x} ${y} 0.032" rpy="0 0 -0.45"/>
+      <geometry>
+        <mesh filename="${mesh_uri}/5010Base.dae"/>
+      </geometry>
+    </visual>
+  </xacro:macro>
+
+  <!-- base_link has no inertia (KDL does not support it in the root link); the frame mass
+       is in base_inertia, which Gazebo merges into base_link -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.025" rpy="0 0 ${pi}"/>
+      <geometry>
+        <mesh filename="${mesh_uri}/NXP-HGD-CF.dae"/>
+      </geometry>
+    </visual>
+    <xacro:motor_base x="${arm}" y="${arm}"/>
+    <xacro:motor_base x="${-arm}" y="${arm}"/>
+    <xacro:motor_base x="${arm}" y="${-arm}"/>
+    <xacro:motor_base x="${-arm}" y="${-arm}"/>
+
+    <collision name="body">
+      <origin xyz="0 0 0.007" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.35355339059327373 0.35355339059327373 0.05"/>
+      </geometry>
+    </collision>
+    <collision name="leg_right">
+      <origin xyz="0 -0.098 -0.123" rpy="-0.35 0 0"/>
+      <geometry>
+        <box size="0.015 0.015 0.21"/>
+      </geometry>
+    </collision>
+    <collision name="leg_left">
+      <origin xyz="0 0.098 -0.123" rpy="0.35 0 0"/>
+      <geometry>
+        <box size="0.015 0.015 0.21"/>
+      </geometry>
+    </collision>
+    <collision name="skid_right">
+      <origin xyz="0 -0.132 -0.2195" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.25 0.015 0.015"/>
+      </geometry>
+    </collision>
+    <collision name="skid_left">
+      <origin xyz="0 0.132 -0.2195" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.25 0.015 0.015"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="base_inertia">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${body_mass}"/>
+      <inertia ixx="${body_ixx}" ixy="0" ixz="0" iyy="${body_iyy}" iyz="0" izz="${body_izz}"/>
+    </inertial>
+  </link>
+  <joint name="base_inertia_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="base_inertia"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <gazebo reference="base_link">
+    <minDepth>0.001</minDepth>
+    <maxVel>0</maxVel>
+  </gazebo>
+
+  <!-- ============================== Rotors ============================== -->
+
+  <xacro:macro name="x500_rotor" params="index x y direction">
+    <xacro:pilotaro_rotor robot="${name}" index="${index}" x="${x}" y="${y}" z="${rotor_z}"
+                          direction="${direction}" mass="0.016076923076923075"
+                          ixx="3.8464910483993325e-07" iyy="2.6115851691700804e-05"
+                          izz="2.649858234714004e-05" length="0.2792307692307692"
+                          width="0.016923076923076923" motor="${motor}">
+      <visuals>
+      <visual>
+        <origin xyz="-0.022 -0.14638461538461536 -0.016" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${mesh_uri}/1345_prop_${direction}.stl"
+                scale="0.8461538461538461 0.8461538461538461 0.8461538461538461"/>
+        </geometry>
+        <material name="dark_grey">
+          <color rgba="0.2 0.2 0.2 1"/>
+        </material>
+      </visual>
+      <visual>
+        <origin xyz="0 0 -0.032" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${mesh_uri}/5010Bell.dae"/>
+        </geometry>
+      </visual>
+      </visuals>
+    </xacro:pilotaro_rotor>
+  </xacro:macro>
+
+  <!-- Same order and directions as the PX4 x500 (quad X) -->
+  <xacro:x500_rotor index="0" x="${arm}" y="${-arm}" direction="ccw"/>
+  <xacro:x500_rotor index="1" x="${-arm}" y="${arm}" direction="ccw"/>
+  <xacro:x500_rotor index="2" x="${arm}" y="${arm}" direction="cw"/>
+  <xacro:x500_rotor index="3" x="${-arm}" y="${-arm}" direction="cw"/>
+
+  <!-- ============================== Sensors ============================== -->
+
+  <xacro:pilotaro_imu robot="${name}" rate="250"/>
+  <xacro:pilotaro_air_pressure robot="${name}" rate="50"/>
+  <xacro:pilotaro_magnetometer robot="${name}" rate="50"/>
+  <xacro:pilotaro_navsat robot="${name}" rate="10"/>
+
+  <xacro:if value="$(arg cameras)">
+    <xacro:pilotaro_camera robot="${name}" prefix="camera_front" x="0.13" y="0" z="0.0"
+                           roll="0" pitch="0" width="1280" height="960" hfov="1.7012" rate="30"
+                           mass="0.025" size="0.02"/>
+    <xacro:pilotaro_camera robot="${name}" prefix="camera_down" x="0.05" y="0" z="-0.04"
+                           roll="0" pitch="${pi / 2}" width="640" height="360" hfov="1.50098"
+                           rate="30" mass="0.025" size="0.02"/>
+  </xacro:if>
+
+  <xacro:pilotaro_odometry robot="${name}" rate="250"/>
+
+</robot>

@@ -1,0 +1,19 @@
+<!--
+  Copyright 2026 Juan S. Cely G.
+  Licensed under the Apache License, Version 2.0
+-->
+<library path="pilotaro_controllers_plugins">
+  <class name="pilotaro_controllers/CascadeController" type="pilotaro_controllers::CascadeController" base_class_type="pilotaro::ControllerBase">
+    <description>
+      Cascaded multirotor controller of the ACKS autopilot: position P, velocity PI,
+      attitude PD on SO(3) and pseudo-inverse motor allocation.
+    </description>
+  </class>
+  <class name="pilotaro_controllers/UnderwaterController" type="pilotaro_controllers::UnderwaterController" base_class_type="pilotaro::ControllerBase">
+    <description>
+      6 DOF controller for vehicles with vectored, reversible thrusters (ROVs, AUVs): position
+      P and velocity PI with added mass, damping and buoyancy feedforward, level attitude on
+      SO(3) and pseudo-inverse thruster allocation.
+    </description>
+  </class>
+</library>

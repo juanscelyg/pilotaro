@@ -1,0 +1,86 @@
+# Copyright 2026 Juan S. Cely G.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Main parameters of pilotaro. Node names are matched in any namespace ("/**/"), so the same
+# file serves every robot of a multirobot system (each one in its own namespace, the robot
+# name). use_sim_time and robot_name are set by launch/pilotaro.launch.py, which also loads
+# the parameters of the vehicle (pilotaro_description/config/<vehicle>.params.yaml) after
+# this file, so they can override anything set here.
+
+/**/pilotaro_node:
+  ros__parameters:
+    # Main loop: estimator -> states -> controllers -> actuators, in one thread
+    frequency: 250.0              # [Hz] at least the rate of the state estimates
+    spin_time: 0.001              # [s] max time taking messages and service calls per cycle
+
+    # Real time (needs permissions, see README "Tiempo real")
+    real_time:
+      enabled: true
+      required: false             # true: do not start without real time
+      priority: 80                # SCHED_FIFO 1..99, <= the rtprio limit of the user
+      cpu: -1                     # pin the main thread to this CPU, -1 = no affinity
+      lock_memory: true           # mlockall, needs an unlimited memlock limit
+
+    # The vehicle block (mass, inertia, rotors) is in pilotaro_description/config/
+    # <vehicle>.params.yaml, generated from the URDF of the vehicle and loaded after this file
+
+/**/estimator_node:
+  ros__parameters:
+    estimator:
+      # State estimator plugin (pluginlib, base class pilotaro::StateEstimatorBase)
+      plugin: "pilotaro_estimators/OdometryEstimator"
+      # Parameters of OdometryEstimator
+      topic: "odometry"           # relative to the robot namespace
+      twist_in_body_frame: true   # REP 147 (Gazebo OdometryPublisher)
+      frame_id: ""                # if set, odometry in another frame is ignored
+      use_message_stamp: true     # false: stamp with the reception time
+
+/**/states_node:
+  ros__parameters:
+    takeoff_altitude: 2.0         # [m] over the arming point
+    takeoff_speed: 0.8            # [m/s]
+    landing_speed: 0.5            # [m/s]
+    land_detect_altitude: 0.5     # [m] over the arming point
+    land_detect_speed: 0.1        # [m/s]
+    land_detect_time: 1.0         # [s]
+    offboard_timeout: 0.5         # [s] max age of offboard/pose or offboard/twist
+    estimate_timeout: 0.5         # [s] disarm if there are no estimates while armed
+    offboard_frame_id: ""         # if set, offboard/pose in another frame is ignored
+
+/**/controllers_node:
+  ros__parameters:
+    min_dt: 0.0001                # [s] bounds of the control time step
+    max_dt: 0.05
+    controller:
+      # Controller plugin (pluginlib, base class pilotaro::ControllerBase)
+      plugin: "pilotaro_controllers/CascadeController"
+      # Parameters of CascadeController
+      position_p: [1.0, 1.0, 1.5]
+      velocity_p: [2.5, 2.5, 4.0]
+      velocity_i: [0.5, 0.5, 1.0]
+      velocity_i_max: [2.0, 2.0, 3.0]
+      attitude_p: [60.0, 60.0, 20.0]
+      angular_rate_p: [14.0, 14.0, 8.0]
+      max_horizontal_speed: 3.0   # [m/s]
+      max_vertical_speed: 1.5     # [m/s]
+      max_tilt: 0.6               # [rad]
+
+/**/actuators_node:
+  ros__parameters:
+    idle_rot_velocity: 100.0      # [rad/s] rotor speed when ARMED
+    output:
+      # Actuator output plugin (pluginlib, base class pilotaro::ActuatorOutputBase)
+      plugin: "pilotaro_actuators/MotorSpeedOutput"
+      # Parameters of MotorSpeedOutput
+      topic: "command/motor_speed"

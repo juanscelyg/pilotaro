@@ -1,0 +1,417 @@
+<?xml version="1.0"?>
+<!--
+  Copyright 2026 Juan S. Cely G.
+  Licensed under the Apache License, Version 2.0
+
+  Building blocks of the pilotaro vehicles: rotors with their Gazebo motor model, sensors
+  and ground truth odometry. Every topic is /<robot>/..., every frame <robot>/..., so
+  several robots can share a simulation.
+
+  The motor of a rotor is a dictionary, e.g.
+    <xacro:property name="motor" value="${dict(motor_constant=8.54858e-06,
+      moment_constant=0.016, max_rot_velocity=1000.0, time_constant_up=0.0125,
+      time_constant_down=0.025, rotor_drag_coefficient=8.06428e-05,
+      rolling_moment_coefficient=1e-06)}"/>
+  scripts/update_vehicle_params.py reads these values back from the motor plugins.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Inertia of a solid box -->
+  <xacro:macro name="pilotaro_box_inertia" params="mass x y z">
+    <inertial>
+      <mass value="${mass}"/>
+      <inertia ixx="${mass * (y * y + z * z) / 12.0}" ixy="0" ixz="0"
+               iyy="${mass * (x * x + z * z) / 12.0}" iyz="0"
+               izz="${mass * (x * x + y * y) / 12.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- ============================== Rotor ============================== -->
+
+  <!--
+    robot: robot name; index: actuator number (position in command/motor_speed);
+    x, y, z: rotor hub on base_link; direction: ccw or cw (seen from above);
+    mass, ixx, iyy, izz: rotor inertia; length, width: propeller box for collisions;
+    motor: dictionary with the motor parameters; visuals: <visuals> element with the
+    <visual> elements of the rotor
+  -->
+  <xacro:macro name="pilotaro_rotor"
+               params="robot index x y z direction mass ixx iyy izz length width motor **visuals">
+    <link name="rotor_${index}">
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="${mass}"/>
+        <inertia ixx="${ixx}" ixy="0" ixz="0" iyy="${iyy}" iyz="0" izz="${izz}"/>
+      </inertial>
+      <xacro:insert_block name="visuals"/>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${length} ${width} 0.0008461538461538462"/>
+        </geometry>
+      </collision>
+    </link>
+    <joint name="rotor_${index}_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="rotor_${index}"/>
+      <origin xyz="${x} ${y} ${z}" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+    </joint>
+    <gazebo>
+      <plugin filename="gz-sim-multicopter-motor-model-system"
+              name="gz::sim::systems::MulticopterMotorModel">
+        <robotNamespace>${robot}</robotNamespace>
+        <jointName>rotor_${index}_joint</jointName>
+        <linkName>rotor_${index}</linkName>
+        <turningDirection>${direction}</turningDirection>
+        <timeConstantUp>${motor['time_constant_up']}</timeConstantUp>
+        <timeConstantDown>${motor['time_constant_down']}</timeConstantDown>
+        <maxRotVelocity>${motor['max_rot_velocity']}</maxRotVelocity>
+        <motorConstant>${motor['motor_constant']}</motorConstant>
+        <momentConstant>${motor['moment_constant']}</momentConstant>
+        <commandSubTopic>command/motor_speed</commandSubTopic>
+        <actuator_number>${index}</actuator_number>
+        <rotorDragCoefficient>${motor['rotor_drag_coefficient']}</rotorDragCoefficient>
+        <rollingMomentCoefficient>${motor['rolling_moment_coefficient']}</rollingMomentCoefficient>
+        <motorSpeedPubTopic>motor_speed/${index}</motorSpeedPubTopic>
+        <rotorVelocitySlowdownSim>10</rotorVelocitySlowdownSim>
+        <motorType>velocity</motorType>
+      </plugin>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ============================== Thruster ============================== -->
+
+  <!--
+    Marine thruster (Gazebo Thruster system), commanded with its thrust in newtons on
+    /<robot>/thruster_<index>/cmd_thrust (pilotaro_actuators/ThrusterOutput).
+    robot: robot name; index: actuator number; x, y, z: thruster on base_link; roll, pitch,
+    yaw: orientation of the thruster frame, whose +z is the direction of a positive thrust;
+    direction: 1 (ccw propeller) or -1 (cw), the sign of the thrust coefficient;
+    thruster: dictionary with thrust_coefficient (positive), fluid_density [kg/m^3],
+    propeller_diameter [m] and max_thrust [N] (the same both ways);
+    visuals: <visuals> element with the <visual> elements of the thruster
+  -->
+  <xacro:macro name="pilotaro_thruster"
+               params="robot index x y z roll pitch yaw direction thruster **visuals">
+    <link name="thruster_${index}">
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.002"/>
+        <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+      </inertial>
+      <xacro:insert_block name="visuals"/>
+    </link>
+    <joint name="thruster_${index}_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="thruster_${index}"/>
+      <origin xyz="${x} ${y} ${z}" rpy="${roll} ${pitch} ${yaw}"/>
+      <axis xyz="0 0 1"/>
+    </joint>
+    <gazebo>
+      <plugin filename="gz-sim-thruster-system" name="gz::sim::systems::Thruster">
+        <namespace>${robot}</namespace>
+        <joint_name>thruster_${index}_joint</joint_name>
+        <topic>thruster_${index}/cmd_thrust</topic>
+        <thrust_coefficient>${direction * thruster['thrust_coefficient']}</thrust_coefficient>
+        <fluid_density>${thruster['fluid_density']}</fluid_density>
+        <propeller_diameter>${thruster['propeller_diameter']}</propeller_diameter>
+        <velocity_control>true</velocity_control>
+        <max_thrust_cmd>${thruster['max_thrust']}</max_thrust_cmd>
+        <min_thrust_cmd>${-thruster['max_thrust']}</min_thrust_cmd>
+      </plugin>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ============================== Hydrodynamics ============================== -->
+
+  <!--
+    Added mass, linear and quadratic damping of a link moving in water (Gazebo
+    Hydrodynamics system, SNAME notation, body frame). The buoyancy comes from the volume of
+    the collisions of the link and the Buoyancy system of the world.
+    The plugin computes the added mass explicitly, which is unstable when it is larger than
+    the mass of the link (sway and heave of a BlueROV2), so it is disabled here:
+    pilotaro_gazebo/launch/spawn.launch.py moves these values to the <fluid_added_mass> of
+    the link, which DART integrates implicitly.
+    hydro: dictionary with water_density and the 18 coefficients (all negative or zero):
+    xDotU yDotV zDotW kDotP mDotQ nDotR (added mass), xU yV zW kP mQ nR (linear damping),
+    xUabsU yVabsV zWabsW kPabsP mQabsQ nRabsR (quadratic damping)
+  -->
+  <xacro:macro name="pilotaro_hydrodynamics" params="link hydro">
+    <gazebo>
+      <plugin filename="gz-sim-hydrodynamics-system" name="gz::sim::systems::Hydrodynamics">
+        <link_name>${link}</link_name>
+        <water_density>${hydro['water_density']}</water_density>
+        <disable_added_mass>true</disable_added_mass>
+        <xDotU>${hydro['xDotU']}</xDotU>
+        <yDotV>${hydro['yDotV']}</yDotV>
+        <zDotW>${hydro['zDotW']}</zDotW>
+        <kDotP>${hydro['kDotP']}</kDotP>
+        <mDotQ>${hydro['mDotQ']}</mDotQ>
+        <nDotR>${hydro['nDotR']}</nDotR>
+        <xU>${hydro['xU']}</xU>
+        <yV>${hydro['yV']}</yV>
+        <zW>${hydro['zW']}</zW>
+        <kP>${hydro['kP']}</kP>
+        <mQ>${hydro['mQ']}</mQ>
+        <nR>${hydro['nR']}</nR>
+        <xUabsU>${hydro['xUabsU']}</xUabsU>
+        <yVabsV>${hydro['yVabsV']}</yVabsV>
+        <zWabsW>${hydro['zWabsW']}</zWabsW>
+        <kPabsP>${hydro['kPabsP']}</kPabsP>
+        <mQabsQ>${hydro['mQabsQ']}</mQabsQ>
+        <nRabsR>${hydro['nRabsR']}</nRabsR>
+      </plugin>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ============================== IMU ============================== -->
+
+  <xacro:macro name="pilotaro_imu_noise"
+               params="stddev bias_mean bias_stddev dynamic_bias_stddev correlation_time precision">
+    <noise type="gaussian">
+      <mean>0</mean>
+      <stddev>${stddev}</stddev>
+      <bias_mean>${bias_mean}</bias_mean>
+      <bias_stddev>${bias_stddev}</bias_stddev>
+      <dynamic_bias_stddev>${dynamic_bias_stddev}</dynamic_bias_stddev>
+      <dynamic_bias_correlation_time>${correlation_time}</dynamic_bias_correlation_time>
+      <precision>${precision}</precision>
+    </noise>
+  </xacro:macro>
+  <xacro:macro name="pilotaro_gyro_noise">
+    <xacro:pilotaro_imu_noise stddev="0.009" bias_mean="0.00075" bias_stddev="0.005"
+                              dynamic_bias_stddev="0.00002" correlation_time="400.0"
+                              precision="0.00025"/>
+  </xacro:macro>
+  <xacro:macro name="pilotaro_accel_noise">
+    <xacro:pilotaro_imu_noise stddev="0.021" bias_mean="0.05" bias_stddev="0.0075"
+                              dynamic_bias_stddev="0.000375" correlation_time="175.0"
+                              precision="0.005"/>
+  </xacro:macro>
+
+  <!-- IMU at the origin of base_link: /<robot>/imu -->
+  <xacro:macro name="pilotaro_imu" params="robot rate:=250">
+    <link name="imu_link"/>
+    <joint name="imu_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="imu_link"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+    <gazebo reference="base_link">
+      <sensor name="imu" type="imu">
+        <always_on>1</always_on>
+        <update_rate>${rate}</update_rate>
+        <topic>/${robot}/imu</topic>
+        <gz_frame_id>${robot}/imu_link</gz_frame_id>
+        <imu>
+          <enable_orientation>0</enable_orientation>
+          <angular_velocity>
+            <x><xacro:pilotaro_gyro_noise/></x>
+            <y><xacro:pilotaro_gyro_noise/></y>
+            <z><xacro:pilotaro_gyro_noise/></z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x><xacro:pilotaro_accel_noise/></x>
+            <y><xacro:pilotaro_accel_noise/></y>
+            <z><xacro:pilotaro_accel_noise/></z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ============================== Barometer, magnetometer, GPS ============================== -->
+
+  <!-- /<robot>/air_pressure -->
+  <xacro:macro name="pilotaro_air_pressure" params="robot rate:=50">
+    <gazebo reference="base_link">
+      <sensor name="air_pressure" type="air_pressure">
+        <always_on>1</always_on>
+        <update_rate>${rate}</update_rate>
+        <topic>/${robot}/air_pressure</topic>
+        <gz_frame_id>${robot}/base_link</gz_frame_id>
+        <air_pressure>
+          <reference_altitude>0</reference_altitude>
+          <pressure>
+            <noise type="gaussian">
+              <mean>0</mean>
+              <stddev>0.01</stddev>
+            </noise>
+          </pressure>
+        </air_pressure>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- /<robot>/magnetometer -->
+  <xacro:macro name="pilotaro_magnetometer" params="robot rate:=50">
+    <gazebo reference="base_link">
+      <sensor name="magnetometer" type="magnetometer">
+        <always_on>1</always_on>
+        <update_rate>${rate}</update_rate>
+        <topic>/${robot}/magnetometer</topic>
+        <gz_frame_id>${robot}/base_link</gz_frame_id>
+        <magnetometer>
+          <x><noise type="gaussian"><mean>0.000000080</mean><bias_mean>0.000000400</bias_mean></noise></x>
+          <y><noise type="gaussian"><mean>0.000000080</mean><bias_mean>0.000000400</bias_mean></noise></y>
+          <z><noise type="gaussian"><mean>0.000000080</mean><bias_mean>0.000000400</bias_mean></noise></z>
+        </magnetometer>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- /<robot>/navsat. Needs the NavSat system and <spherical_coordinates> in the world -->
+  <xacro:macro name="pilotaro_navsat" params="robot rate:=10">
+    <gazebo reference="base_link">
+      <sensor name="navsat" type="navsat">
+        <always_on>1</always_on>
+        <update_rate>${rate}</update_rate>
+        <topic>/${robot}/navsat</topic>
+        <gz_frame_id>${robot}/base_link</gz_frame_id>
+        <navsat>
+          <position_sensing>
+            <!-- gz applies the horizontal noise to latitude/longitude in degrees:
+                 4.5e-6 deg ~ 0.5 m. The vertical noise is in meters -->
+            <horizontal>
+              <noise type="gaussian"><mean>0.0</mean><stddev>4.5e-6</stddev></noise>
+            </horizontal>
+            <vertical>
+              <noise type="gaussian"><mean>0.0</mean><stddev>1.0</stddev></noise>
+            </vertical>
+          </position_sensing>
+          <velocity_sensing>
+            <horizontal>
+              <noise type="gaussian"><mean>0.0</mean><stddev>0.1</stddev></noise>
+            </horizontal>
+            <vertical>
+              <noise type="gaussian"><mean>0.0</mean><stddev>0.1</stddev></noise>
+            </vertical>
+          </velocity_sensing>
+        </navsat>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ============================== Camera ============================== -->
+
+  <!--
+    prefix: camera name, /<robot>/<prefix>/image and camera_info; x, y, z, roll, pitch:
+    mount on base_link (the camera looks along +x of its link); width, height, hfov, rate:
+    image; mass: of the camera body, 0 if it is part of the frame mass; size: box of the
+    camera body, 0 for no visual
+  -->
+  <xacro:macro name="pilotaro_camera"
+               params="robot prefix x y z roll pitch width height hfov rate mass:=0.0 size:=0.0">
+    <link name="${prefix}_link">
+      <xacro:if value="${mass > 0.0}">
+        <xacro:pilotaro_box_inertia mass="${mass}" x="${size}" y="${2.5 * size}" z="${size}"/>
+      </xacro:if>
+      <xacro:if value="${size > 0.0}">
+        <visual>
+          <geometry>
+            <box size="${size} ${2.5 * size} ${size}"/>
+          </geometry>
+          <material name="black">
+            <color rgba="0.05 0.05 0.05 1"/>
+          </material>
+        </visual>
+      </xacro:if>
+    </link>
+    <joint name="${prefix}_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="${prefix}_link"/>
+      <origin xyz="${x} ${y} ${z}" rpy="${roll} ${pitch} 0"/>
+    </joint>
+    <gazebo reference="base_link">
+      <sensor name="${prefix}" type="camera">
+        <pose>${x} ${y} ${z} ${roll} ${pitch} 0</pose>
+        <always_on>1</always_on>
+        <update_rate>${rate}</update_rate>
+        <topic>/${robot}/${prefix}/image</topic>
+        <gz_frame_id>${robot}/${prefix}_link</gz_frame_id>
+        <camera name="${prefix}">
+          <camera_info_topic>/${robot}/${prefix}/camera_info</camera_info_topic>
+          <horizontal_fov>${hfov}</horizontal_fov>
+          <image>
+            <width>${width}</width>
+            <height>${height}</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>0.05</near>
+            <far>300</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0</mean>
+            <stddev>0.007</stddev>
+          </noise>
+        </camera>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ============================== Rangefinder ============================== -->
+
+  <!--
+    Single beam distance sensor (ultrasonic or laser altimeter) looking down:
+    /<robot>/<prefix> (sensor_msgs/LaserScan with one range).
+    x, y, z: mount on base_link; range_min, range_max: range [m]
+  -->
+  <xacro:macro name="pilotaro_rangefinder" params="robot prefix x y z range_min range_max rate:=30">
+    <link name="${prefix}_link"/>
+    <joint name="${prefix}_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="${prefix}_link"/>
+      <origin xyz="${x} ${y} ${z}" rpy="0 ${pi / 2} 0"/>
+    </joint>
+    <gazebo reference="base_link">
+      <sensor name="${prefix}" type="gpu_lidar">
+        <pose>${x} ${y} ${z} 0 ${pi / 2} 0</pose>
+        <always_on>1</always_on>
+        <update_rate>${rate}</update_rate>
+        <topic>/${robot}/${prefix}</topic>
+        <gz_frame_id>${robot}/${prefix}_link</gz_frame_id>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>${range_min}</min>
+            <max>${range_max}</max>
+            <resolution>0.01</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.01</stddev>
+          </noise>
+        </lidar>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+  <!-- ============================== Odometry ============================== -->
+
+  <!-- Ground truth pose (world frame) and twist (body frame): /<robot>/odometry, used by
+       the OdometryEstimator plugin of pilotaro -->
+  <xacro:macro name="pilotaro_odometry" params="robot rate:=250">
+    <gazebo>
+      <plugin filename="gz-sim-odometry-publisher-system"
+              name="gz::sim::systems::OdometryPublisher">
+        <dimensions>3</dimensions>
+        <odom_topic>/${robot}/odometry</odom_topic>
+        <odom_frame>${robot}/odom</odom_frame>
+        <robot_base_frame>${robot}/base_link</robot_base_frame>
+        <odom_publish_frequency>${rate}</odom_publish_frequency>
+      </plugin>
+    </gazebo>
+  </xacro:macro>
+
+</robot>

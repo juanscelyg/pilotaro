@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>pilotaro_states</name>
+  <version>0.0.0</version>
+  <description>pilotaro states: node that manages the operational states (flight modes and transitions) of the robot, commanded through Trigger services.</description>
+
+  <maintainer email="juanscelyg@gmail.com">Juan S. Cely G.</maintainer>
+
+  <license>Apache License 2.0</license>
+
+  <author>Juan S. Cely G.</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>pilotaro_common</depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

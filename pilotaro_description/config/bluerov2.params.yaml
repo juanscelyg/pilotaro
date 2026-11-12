@@ -1,0 +1,75 @@
+# Copyright 2026 Juan S. Cely G.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Parameters of the bluerov2 for pilotaro, loaded after pilotaro.params.yaml.
+# The vehicle block is generated from urdf/bluerov2.urdf.xacro by
+# scripts/update_vehicle_params.py. Vehicle specific tuning can be added below.
+
+/**/pilotaro_node:
+  ros__parameters:
+    # Generated from bluerov2.urdf.xacro by update_vehicle_params.py (2026-11-10)
+    vehicle:
+      mass: 10.012                                            # [kg]
+      gravity: 9.8                                            # [m/s^2] (kept, not in the URDF)
+      inertia: [0.105134, 0.184175, 0.275272]                 # [kg m^2] about the center of mass
+      rotor_x: [0.14, 0.14, -0.14, -0.14, 0.0, 0.0]           # [m] from the center of mass
+      rotor_y: [-0.092, 0.092, -0.092, 0.092, -0.109, 0.109]  # [m] from the center of mass
+      # [m] from the center of mass
+      rotor_z: [-0.0110176, -0.0110176, -0.0110176, -0.0110176, 0.0659824, 0.0659824]
+      # thrust direction (x, y, z) per rotor
+      rotor_axis: [-0.707107, -0.707107, 0.0, -0.707107, 0.707107, 0.0, 0.707107, -0.707107, 0.0, 0.707107, 0.707107, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0]
+      rotor_direction: [1.0, 1.0, -1.0, -1.0, 1.0, 1.0]       # 1 = ccw, -1 = cw
+      motor_constant: 0.002                                   # thrust = k * w * |w|
+      moment_constant: 0.0                                    # drag torque = c * thrust
+      min_rot_velocity: 0.0                                   # [rad/s] (0 for reversible thrusters)
+      max_rot_velocity: 141.421                               # [rad/s]
+      reversible: true                                        # thrusters spin (and push) both ways
+
+# Underwater vehicle. The controller gains of pilotaro.params.yaml are for multirotors, so
+# every parameter of the UnderwaterController is set here. Its hydrodynamic model is the
+# one of the URDF (Wu 2018), used as feedforward.
+/**/controllers_node:
+  ros__parameters:
+    controller:
+      plugin: "pilotaro_controllers/UnderwaterController"
+      position_p: [1.0, 1.0, 1.0]
+      velocity_p: [2.0, 2.0, 2.0]
+      velocity_i: [0.3, 0.3, 0.3]
+      velocity_i_max: [1.0, 1.0, 1.0]
+      attitude_p: [10.0, 10.0, 6.0]
+      angular_rate_p: [6.0, 6.0, 5.0]
+      max_horizontal_speed: 1.0       # [m/s]
+      max_vertical_speed: 0.5         # [m/s]
+      added_mass: [5.5, 12.7, 14.57]              # [kg] surge, sway, heave
+      added_inertia: [0.12, 0.12, 0.12]           # [kg m^2] roll, pitch, yaw
+      linear_damping: [4.03, 6.22, 5.18]          # [N s/m]
+      quadratic_damping: [18.18, 21.66, 36.99]    # [N s^2/m^2]
+      net_buoyancy: 2.0                           # [N] buoyancy - weight
+
+# One std_msgs/Float64 per T200 with its thrust, no idle spin when ARMED
+/**/actuators_node:
+  ros__parameters:
+    idle_rot_velocity: 0.0
+    output:
+      plugin: "pilotaro_actuators/ThrusterOutput"
+      topic_pattern: "thruster_{}/cmd_thrust"
+      command: "thrust"
+
+# "takeoff" dives takeoff_altitude from the arming point (the surface) and holds the depth;
+# "landing" descends to the bottom and disarms on it
+/**/states_node:
+  ros__parameters:
+    takeoff_altitude: -2.0        # [m]
+    takeoff_speed: 0.3            # [m/s]
+    landing_speed: 0.3            # [m/s]

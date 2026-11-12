@@ -1,0 +1,16 @@
+<!--
+  Copyright 2026 Juan S. Cely G.
+  Licensed under the Apache License, Version 2.0
+-->
+<library path="pilotaro_actuators_plugins">
+  <class name="pilotaro_actuators/MotorSpeedOutput" type="pilotaro_actuators::MotorSpeedOutput" base_class_type="pilotaro::ActuatorOutputBase">
+    <description>
+      All the rotor speeds in one actuator_msgs/Actuators (Gazebo MulticopterMotorModel).
+    </description>
+  </class>
+  <class name="pilotaro_actuators/ThrusterOutput" type="pilotaro_actuators::ThrusterOutput" base_class_type="pilotaro::ActuatorOutputBase">
+    <description>
+      One std_msgs/Float64 per thruster with its thrust or angular velocity (Gazebo Thruster).
+    </description>
+  </class>
+</library>

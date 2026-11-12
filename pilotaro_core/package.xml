@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>pilotaro_core</name>
+  <version>0.0.0</version>
+  <description>pilotaro core: interfaces of the state estimator and controller plugins.</description>
+
+  <maintainer email="juanscelyg@gmail.com">Juan S. Cely G.</maintainer>
+
+  <license>Apache License 2.0</license>
+
+  <author>Juan S. Cely G.</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>pilotaro_common</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

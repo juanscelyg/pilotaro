@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>pilotaro</name>
+  <version>0.0.0</version>
+  <description>pilotaro: metapackage with launch and params files.</description>
+
+  <maintainer email="juanscelyg@gmail.com">Juan S. Cely G.</maintainer>
+
+  <license>Apache License 2.0</license>
+
+  <author>Juan S. Cely G.</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>pilotaro_common</depend>
+  <depend>pilotaro_core</depend>
+  <depend>pilotaro_states</depend>
+  <depend>pilotaro_estimators</depend>
+  <depend>pilotaro_actuators</depend>
+  <depend>pilotaro_controllers</depend>
+  <depend>pilotaro_system</depend>
+
+  <exec_depend>pilotaro_description</exec_depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
