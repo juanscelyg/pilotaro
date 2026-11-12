@@ -28,9 +28,9 @@ namespace pilotaro_estimators
 
 /**
  * @class OdometryEstimator
- * @brief Base estimator: takes the state directly from a nav_msgs/Odometry topic, as the
- * ACKS autopilot did (ground truth odometry in simulation, or the output of an external
- * estimator such as a VIO or an EKF).
+ * @brief Base estimator: takes the state directly from a nav_msgs/Odometry topic (ground
+ * truth odometry in simulation, or the output of an external estimator such as a VIO or an
+ * EKF).
  *
  * Parameters (prefix "estimator."):
  *  - topic (string, "odometry"): odometry topic, relative to the robot namespace

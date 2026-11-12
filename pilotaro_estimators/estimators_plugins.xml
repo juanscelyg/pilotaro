@@ -6,7 +6,7 @@
   <class name="pilotaro_estimators/OdometryEstimator" type="pilotaro_estimators::OdometryEstimator" base_class_type="pilotaro::StateEstimatorBase">
     <description>
       State taken directly from a nav_msgs/Odometry topic (ground truth in simulation or an
-      external estimator). Same behaviour as the ACKS autopilot.
+      external estimator).
     </description>
   </class>
 </library>

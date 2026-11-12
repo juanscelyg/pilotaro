@@ -44,7 +44,7 @@ struct CascadeGains
 
 /**
  * @class CascadeController
- * @brief Cascaded multirotor controller, the one of the ACKS autopilot.
+ * @brief Cascaded multirotor controller.
  *
  * position (P) -> velocity (PI) -> thrust vector -> attitude on SO(3) (PD)
  * -> body torques -> motor allocation -> rotor angular velocities.

@@ -1,8 +1,8 @@
 # ![pilotaro](docs/images/pilotaro_logo.png)
 
-Autopilot for multirotors and underwater vehicles on ROS 2 (Jazzy), successor of
-[acks](../acks). It keeps its interface (`std_srvs/Trigger` services, `offboard/*` setpoints,
-`mode` topic) and its flight modes, and adds:
+Autopilot for multirotors and underwater vehicles on ROS 2. It is driven with
+`std_srvs/Trigger` services and `offboard/*` setpoints, and reports its flight mode on the
+`mode` topic. Main features:
 
 - **State estimator, controller and actuator output as plugins** (pluginlib), selected and
   configured in the parameter files.
@@ -65,8 +65,50 @@ ros2 service call /x500/landing std_srvs/srv/Trigger     # lands and disarms
 ros2 topic echo /x500/mode
 ```
 
-Modes, services and acceptance conditions are the same as in acks (see its README).
-`offboard` is accepted in any mode except DISARMED, as in acks.
+### Flight modes
+
+```text
+DISARMED --arming--> ARMED --takeoff--> TAKEOFF --(altitude reached)--> LOITER
+ARMED --arming--> DISARMED
+any but DISARMED --offboard--> OFFBOARD --(setpoint timeout)--> LOITER
+flying --loiter--> LOITER          flying --landing--> LANDING --(touchdown)--> DISARMED
+armed --(no state estimate for estimate_timeout)--> DISARMED
+```
+
+| Mode | Vehicle |
+|---|---|
+| `DISARMED` | Motors stopped. |
+| `ARMED` | On the ground (or at the surface), motors at `idle_rot_velocity`. |
+| `TAKEOFF` | Climbs `takeoff_altitude` from the arming point at `takeoff_speed` (dives if negative). |
+| `LOITER` | Holds its position and heading. |
+| `LANDING` | Descends at `landing_speed` keeping XY; disarms on touchdown. |
+| `OFFBOARD` | Follows the `offboard/pose` or `offboard/twist` setpoints. |
+
+`TAKEOFF`, `LOITER`, `LANDING` and `OFFBOARD` are the flying modes. Every service is a
+`std_srvs/Trigger` in the robot namespace; a rejected command answers `success: false` with
+the reason.
+
+| Service | Accepted in | Does |
+|---|---|---|
+| `arming` | `DISARMED` with a state estimate, or `ARMED` | Arms (stores the arming point) or disarms. |
+| `takeoff` | `ARMED` | Goes to `TAKEOFF`. |
+| `loiter` | flying | Holds the current position and heading. |
+| `landing` | flying | Goes to `LANDING`. |
+| `offboard` | any mode but `DISARMED`, with a setpoint newer than `offboard_timeout` | Goes to `OFFBOARD`. |
+
+| Topic | Type | |
+|---|---|---|
+| `mode` | `std_msgs/String` | Current mode (transient local: late subscribers get it). |
+| `offboard/pose` | `geometry_msgs/PoseStamped` | Position and yaw in the world frame. With `offboard_frame_id` set, other frames are ignored. |
+| `offboard/twist` | `geometry_msgs/Twist` | Linear velocity in the world frame and yaw rate (`angular.z`). |
+
+Offboard setpoints must keep arriving (more often than every `offboard_timeout`, 0.5 s by
+default); if they stop, the vehicle holds its position in `LOITER`. Touchdown is detected
+when the vehicle stays within `land_detect_altitude` of the arming point, slower than
+`land_detect_speed`, for `land_detect_time`. All these parameters belong to `states_node`
+in `params/pilotaro.params.yaml`.
+
+### Launch files
 
 | Launch | What it does |
 |---|---|
@@ -212,8 +254,8 @@ them reads `<plugin_name>.plugin`, and the plugin reads its parameters with the 
 
 ### Estimator: `pilotaro_estimators/OdometryEstimator`
 
-Does the same as acks: takes the state from a `nav_msgs/Odometry` (in simulation, the
-*ground truth* odometry of the `OdometryPublisher` at 250 Hz). It is now configurable:
+Takes the state from a `nav_msgs/Odometry` (in simulation, the *ground truth* odometry of
+the `OdometryPublisher` at 250 Hz):
 
 | Parameter | Default | |
 |---|---|---|
@@ -228,8 +270,8 @@ estimate, and its `dt` is the difference between their stamps. If no estimates a
 
 ### Controller: `pilotaro_controllers/CascadeController`
 
-The cascade controller from acks: position P → velocity PI → thrust → SO(3) attitude PD →
-allocation. Allocation uses the pseudoinverse, so it supports any planar geometry with 4 or
+Cascade controller for multirotors: position P → velocity PI → thrust → SO(3) attitude
+PD → allocation. Allocation uses the pseudoinverse, so it supports any planar geometry with 4 or
 more rotors (there is a test with a hexarotor). Its gains and limits are in the `controller`
 block. It only accepts rotors that push towards +z and are not reversible.
 
@@ -533,19 +575,6 @@ allocation accounts for it.
   | Yaw 90° | 0.0° |
   | Descent to the bottom | DISARMED at z = −9.89 m (skids on the sand at −10) |
   | Passive ascent | 0.173 m/s (expected 0.173) |
-
-## Differences from acks
-
-| | acks | pilotaro |
-|---|---|---|
-| Estimation | Fixed odometry, inside the node | Configurable plugin (`OdometryEstimator` does what acks did) |
-| Control | Fixed `Controller`, quads only | Plugin (`CascadeController`, 4 or more rotors) |
-| Execution | Odometry callback, normal priority | Fixed-rate loop, `SCHED_FIFO`, locked memory |
-| Multiple robots | Name `x500` hard-coded in model, bridge and launches | `robot_name` everywhere: namespace, model, topics, frames |
-| Model | CTU-CRAS-NORLAB X500 (SDF) | PX4 Holybro X500 (URDF/xacro), no CTU parts |
-| Vehicle | Hand-written parameters | Generated from the URDF |
-| Motor output | In the same node | `ActuatorsNode` applies the per-mode policy (0 / idle / control) |
-| `offboard/pose` frame | Ignored | Can be enforced (`offboard_frame_id`) |
 
 ## License
 

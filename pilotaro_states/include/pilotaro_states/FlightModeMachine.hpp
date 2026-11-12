@@ -58,7 +58,7 @@ struct CommandResult
 
 /**
  * @class FlightModeMachine
- * @brief Flight modes of the ACKS autopilot, without ROS.
+ * @brief Flight modes of pilotaro, without ROS.
  *
  * DISARMED --arming--> ARMED --takeoff--> TAKEOFF --(altitude reached)--> LOITER
  * ARMED --arming--> DISARMED

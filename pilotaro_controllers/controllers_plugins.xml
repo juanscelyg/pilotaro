@@ -5,7 +5,7 @@
 <library path="pilotaro_controllers_plugins">
   <class name="pilotaro_controllers/CascadeController" type="pilotaro_controllers::CascadeController" base_class_type="pilotaro::ControllerBase">
     <description>
-      Cascaded multirotor controller of the ACKS autopilot: position P, velocity PI,
+      Cascaded multirotor controller: position P, velocity PI,
       attitude PD on SO(3) and pseudo-inverse motor allocation.
     </description>
   </class>
