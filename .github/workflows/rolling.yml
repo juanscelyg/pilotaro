@@ -1,0 +1,110 @@
+# Copyright 2026 Juan S. Cely G.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Builds pilotaro on ROS 2 Rolling, runs its unit tests and flies every vehicle in Gazebo
+# (headless) with pilotaro_gazebo/scripts/flight_check.py, which exits with 1 if any check
+# fails. Rolling changes every day, so it also runs every week.
+name: rolling
+
+on:
+  push:
+    branches: [rolling]
+  pull_request:
+    branches: [rolling]
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    container: ros:rolling
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      # pilotaro asks for real-time scheduling; containers do not allow it and it falls back
+      # (real_time.required is false), so its warnings are expected here
+      RCUTILS_COLORIZED_OUTPUT: '0'
+    steps:
+      - name: Check out pilotaro
+        uses: actions/checkout@v4
+        with:
+          path: src/pilotaro
+
+      # disaster_world is only used by pilotaro_gazebo/launch/disaster.launch.py, not by these
+      # tests, and it is not released as a binary: skip it
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          rosdep update --rosdistro "$ROS_DISTRO"
+          rosdep install -y --ignore-src --from-paths src --rosdistro "$ROS_DISTRO" \
+            --skip-keys disaster_world
+
+      - name: Build
+        run: |
+          source /opt/ros/$ROS_DISTRO/setup.bash
+          colcon build --event-handlers console_cohesion+
+
+      - name: Unit tests
+        run: |
+          source /opt/ros/$ROS_DISTRO/setup.bash
+          colcon test --packages-select pilotaro_common pilotaro_estimators \
+            pilotaro_controllers pilotaro_states pilotaro_actuators pilotaro_description
+          colcon test-result --verbose
+
+      - name: Flight test, x500 and Bebop 2
+        run: |
+          source install/setup.bash
+          mkdir -p log/sim
+          ros2 launch pilotaro_gazebo sim.launch.py headless:=true cameras:=false \
+            robots:=big:x500,small:bebop2 spacing:=3.0 > log/sim/multirotor.log 2>&1 &
+          launch=$!
+          set +e
+          timeout 600 bash -c 'until ros2 service list 2>/dev/null | grep /big/arming > /dev/null &&
+            ros2 service list 2>/dev/null | grep /small/arming > /dev/null; do sleep 2; done'
+          timeout 900 ros2 run pilotaro_gazebo flight_check.py big small
+          rc=$?
+          kill -INT $launch; wait $launch
+          exit $rc
+
+      - name: Flight test, BlueROV2 underwater
+        run: |
+          source install/setup.bash
+          mkdir -p log/sim
+          ros2 launch pilotaro_gazebo sim.launch.py headless:=true cameras:=false \
+            world:=underwater robots:=rov1:bluerov2 > log/sim/underwater.log 2>&1 &
+          launch=$!
+          set +e
+          timeout 600 bash -c 'until ros2 service list 2>/dev/null | grep /rov1/arming > /dev/null; do sleep 2; done'
+          timeout 1200 ros2 run pilotaro_gazebo flight_check.py rov1 --takeoff-altitude -2.0 \
+            --goal-time 15 --landing-time 80 --max-rotor-speed 141.5 \
+            --expect-float -0.0907 --expect-ascent 0.173
+          rc=$?
+          kill -INT $launch; wait $launch
+          exit $rc
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            log/
+            build/*/test_results/

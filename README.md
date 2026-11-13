@@ -1,5 +1,7 @@
 # ![pilotaro](docs/images/pilotaro_logo.png)
 
+[![rolling](https://github.com/juanscelyg/pilotaro/actions/workflows/rolling.yml/badge.svg?branch=rolling)](https://github.com/juanscelyg/pilotaro/actions/workflows/rolling.yml)
+
 Autopilot for multirotors and underwater vehicles on ROS 2. It is driven with
 `std_srvs/Trigger` services and `offboard/*` setpoints, and reports its flight mode on the
 `mode` topic. Main features:
@@ -531,7 +533,8 @@ allocation accounts for it.
   5. lands and disarms.
 
   For underwater vehicles there are two optional physical checks:
-  - `--expect-float Z`: disarmed, it floats still at the surface at z = Z;
+  - `--expect-float Z`: disarmed, it floats still at the surface at z = Z. The check first
+    waits (up to `--settle-time`, 60 s) until the vehicle stops bobbing after the spawn;
   - `--expect-ascent V`: after disarming on the bottom, it rises on its own at the terminal
     velocity V given by its net buoyancy and damping.
 
@@ -575,6 +578,33 @@ allocation accounts for it.
   | Yaw 90° | 0.0° |
   | Descent to the bottom | DISARMED at z = −9.89 m (skids on the sand at −10) |
   | Passive ascent | 0.173 m/s (expected 0.173) |
+
+### Continuous integration
+
+[`.github/workflows/rolling.yml`](.github/workflows/rolling.yml) checks that pilotaro works on
+ROS 2 Rolling. It runs on every push and pull request to `rolling`, every Monday (Rolling
+changes daily) and on demand (*Actions → rolling → Run workflow*). In a `ros:rolling`
+container, without a GPU, it:
+
+1. installs the dependencies with `rosdep`, skipping `disaster_world`: the tests do not use
+   it (only `disaster.launch.py` does);
+2. builds every package;
+3. runs the unit tests (`colcon test` + `colcon test-result --verbose`);
+4. flies the x500 and the Bebop 2 together in the `empty` world with `flight_check.py`
+   (Gazebo headless, `cameras:=false`);
+5. flies the BlueROV2 in the `underwater` world (it needs water to float) with
+   `flight_check.py`, including the floating and passive ascent checks.
+
+Any failed check fails the run, and the colcon and simulation logs are uploaded as the
+`logs` artifact. The same steps can be reproduced locally:
+
+```bash
+docker run --rm -it -v $PWD:/ws/src/pilotaro -w /ws ros:rolling bash
+# inside the container, the "run" blocks of rolling.yml in order, e.g.:
+apt-get update && rosdep update
+rosdep install -y --ignore-src --from-paths src --skip-keys disaster_world
+source /opt/ros/rolling/setup.bash && colcon build
+```
 
 ## License
 

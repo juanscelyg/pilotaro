@@ -24,7 +24,8 @@ All the robots fly the same sequence at the same time, and every step has a pass
   5. yaw: the goal heading is reached
   6. landing: touchdown and DISARMED
 Underwater vehicles (optional):
-  0. --expect-float Z: before arming, the vehicle floats still at z = Z (the surface)
+  0. --expect-float Z: before arming, once it has stopped bobbing after the spawn (up to
+     --settle-time), the vehicle floats still at z = Z (the surface)
   7. --expect-ascent V: after landing on the bottom, a positively buoyant vehicle rises by
      itself at the terminal speed V given by its net buoyancy and its damping
 
@@ -146,6 +147,19 @@ class FlightCheck(Node):
                 return False
         return True
 
+    def wait_still(self, robots, timeout, still_for=2.0, max_speed=0.02):
+        """Wait until every robot has moved slower than max_speed for still_for seconds."""
+        since = [None]
+
+        def still():
+            if any(r.speed() >= max_speed for r in robots):
+                since[0] = None
+                return False
+            if since[0] is None:
+                since[0] = self.now()
+            return self.now() - since[0] >= still_for
+        return self.wait(still, timeout)
+
     def call(self, robot, service):
         client = robot.clients[service]
         if not client.wait_for_service(timeout_sec=10.0):
@@ -169,6 +183,10 @@ def run(node, args):
             r.check('ready', False, f'odometry {r.odom is not None}, mode {r.mode}')
         return
     node.spin_for(1.0)
+    if args.expect_float is not None:
+        # Spawned at z = 0, an underwater vehicle bobs until the water damps it. Wait until it
+        # is still, so that the floating height is measured (and the vehicle armed) at rest
+        node.wait_still(robots, args.settle_time)
     home = {r.name: r.position() for r in robots}
 
     # 0. floating at the surface
@@ -306,6 +324,8 @@ def main():
                         help='max time to land and disarm [s]')
     parser.add_argument('--expect-float', type=float, metavar='Z',
                         help='underwater: z at which the disarmed vehicle floats')
+    parser.add_argument('--settle-time', type=float, default=60.0,
+                        help='with --expect-float, max time to wait for the vehicle to be still [s]')
     parser.add_argument('--expect-ascent', type=float, metavar='V',
                         help='underwater: terminal speed of the passive ascent [m/s]')
     args, ros_args = parser.parse_known_args()
