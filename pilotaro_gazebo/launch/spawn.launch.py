@@ -40,7 +40,7 @@ import xacro
 
 # Height of base_link over the ground when the vehicle rests on it [m]. Underwater
 # vehicles are dropped at the surface of the water (z = 0) and float
-SPAWN_HEIGHT = {'x500': 0.24, 'bebop2': 0.065, 'bluerov2': 0.0}
+SPAWN_HEIGHT = {'x500': 0.24, 'bebop2': 0.065, 'bluerov2_heavy': 0.0}
 
 # Gazebo sensor type -> (ROS type, Gazebo type) of its topic
 SENSOR_TYPES = {

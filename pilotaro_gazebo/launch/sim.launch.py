@@ -93,7 +93,7 @@ def generate_launch_description():
         description='Comma separated "name" or "name:model"'))
     ld.add_action(DeclareLaunchArgument(
         'model', default_value='x500',
-        description='Vehicle of the robots without model: x500, bebop2, bluerov2'))
+        description='Vehicle of the robots without model: x500, bebop2, bluerov2_heavy'))
     ld.add_action(DeclareLaunchArgument('x', default_value='0.0'))
     ld.add_action(DeclareLaunchArgument('y', default_value='0.0'))
     ld.add_action(DeclareLaunchArgument('yaw', default_value='0.0'))

@@ -11,14 +11,14 @@ Autopilot for multirotors and underwater vehicles on ROS 2. It is driven with
 - **Real-time main loop**: `SCHED_FIFO`, locked memory and, optionally, a dedicated core.
 - **Per-instance platform name** for multi-robot systems: namespace, topics, frames and
   Gazebo model all come from the same `robot_name`.
-- **Vehicles described in URDF/xacro**: Holybro X500, Parrot Bebop 2 and BlueROV2, each with
+- **Vehicles described in URDF/xacro**: Holybro X500, Parrot Bebop 2 and BlueROV2 Heavy, each with
   its sensors, plus a script that updates each vehicle's parameters from its URDF.
 - **Underwater world** with buoyancy and hydrodynamics (added mass, damping).
 
-| Holybro X500 | Parrot Bebop 2 | BlueROV2 |
+| Holybro X500 | Parrot Bebop 2 | BlueROV2 Heavy |
 |:---:|:---:|:---:|
-| ![x500 hovering in LOITER at 2.2 m](docs/images/sim_x500.png) | ![Bebop 2 hovering in LOITER at 2.0 m](docs/images/sim_bebop2.png) | ![BlueROV2 submerged after a 2 m dive in the underwater world](docs/images/sim_bluerov2.png) |
-| `sim.launch.py` — LOITER at 2.2 m after takeoff | `model:=bebop2` — LOITER at 2.0 m | `world:=underwater` — holding depth after a 2 m dive |
+| ![x500 hovering in LOITER at 2.2 m](docs/images/sim_x500.png) | ![Bebop 2 hovering in LOITER at 2.0 m](docs/images/sim_bebop2.png) | ![BlueROV2 Heavy submerged after a 2 m dive in the underwater world](docs/images/sim_bluerov2_heavy.png) |
+| `sim.launch.py` — LOITER at 2.2 m after takeoff | `model:=bebop2` — LOITER at 2.0 m | `robots:=rov:bluerov2_heavy` — holding depth after a 2 m dive |
 
 ## Packages
 
@@ -32,7 +32,7 @@ Autopilot for multirotors and underwater vehicles on ROS 2. It is driven with
 | `pilotaro_states` | `StatesNode`: flight modes, services, offboard setpoints. The logic lives in `FlightModeMachine` (ROS-free, with tests). |
 | `pilotaro_actuators` | `ActuatorsNode` (per-mode policy, loads the plugin) and the `MotorSpeedOutput` and `ThrusterOutput` output plugins. |
 | `pilotaro_system` | `PilotaroNode` (lifecycle) and `pilotaro_main`, the real-time loop. |
-| `pilotaro_description` | Vehicles: `urdf/<vehicle>.urdf.xacro`, `config/<vehicle>.params.yaml`, `meshes/` (BlueROV2) and `scripts/update_vehicle_params.py`. |
+| `pilotaro_description` | Vehicles: `urdf/<vehicle>.urdf.xacro`, `config/<vehicle>.params.yaml`, `meshes/` (BlueROV2 Heavy) and `scripts/update_vehicle_params.py`. |
 | `pilotaro_gazebo` | Empty and underwater worlds, simulation launches (one or several vehicles of any model, disaster world) and `scripts/flight_check.py`. |
 
 ## Quick start
@@ -50,8 +50,8 @@ ros2 launch pilotaro_gazebo sim.launch.py
 # The same with a Parrot Bebop 2
 ros2 launch pilotaro_gazebo sim.launch.py model:=bebop2 robots:=bebop2
 
-# A BlueROV2 in the underwater world (floats at the surface until armed)
-ros2 launch pilotaro_gazebo sim.launch.py world:=underwater robots:=rov:bluerov2
+# A BlueROV2 Heavy in the underwater world (floats at the surface until armed)
+ros2 launch pilotaro_gazebo sim.launch.py world:=underwater robots:=rov:bluerov2_heavy
 ```
 
 In another terminal (the namespace is the robot name, `x500` by default):
@@ -225,7 +225,7 @@ Notes:
 ## Plugins
 
 Plugins are selected and configured in `params/pilotaro.params.yaml`, and the vehicle file
-can change them (the BlueROV2 changes the controller and the output). The node that loads
+can change them (the BlueROV2 Heavy changes the controller and the output). The node that loads
 them reads `<plugin_name>.plugin`, and the plugin reads its parameters with the same prefix:
 
 ```yaml
@@ -291,8 +291,9 @@ For vehicles with vectored, reversible thrusters (ROV, AUV). Controls 6 DOF:
 - **Allocation:** the wrench is distributed among the thrusters with the pseudoinverse of the
   thruster matrix (position, axis and reaction torque of each one).
 - **Uncontrollable DOF:** selected automatically, by priority (surge, sway, heave, yaw, roll,
-  pitch). On a 6-thruster BlueROV2 pitch is not actuated and is left to its hydrostatic
-  stability; the log says so (`not actuated: pitch`).
+  pitch). The 8 thrusters of the BlueROV2 Heavy actuate all 6 DOF; on a vehicle where one
+  is not actuated (e.g. pitch on a 6-thruster BlueROV2) it is left to its hydrostatic
+  stability and the log says so (`not actuated: pitch`).
 - **Saturation:** if a thruster saturates, all of them are scaled together to keep the
   direction of the wrench.
 
@@ -303,7 +304,7 @@ and `net_buoyancy`.
 
 The gains in the main file are the multirotor ones, and both controllers share names
 (`position_p`, `velocity_p`…). So when a vehicle file switches controller, it must set all
-of its parameters, as `config/bluerov2.params.yaml` does.
+of its parameters, as `config/bluerov2_heavy.params.yaml` does.
 
 ### Actuator output
 
@@ -377,13 +378,13 @@ its `MulticopterMotorModel`, marine thruster with its `Thruster`, hydrodynamics,
 barometer, magnetometer, GPS, camera, rangefinder and odometry), and its parameters in
 `config/<vehicle>.params.yaml`. All topics are prefixed with the robot name.
 
-| | x500 | bebop2 | bluerov2 |
+| | x500 | bebop2 | bluerov2_heavy |
 |---|---|---|---|
-| Model | Holybro X500 (PX4) | Parrot Bebop 2 | Blue Robotics BlueROV2 (6 thrusters) |
-| Mass | 2.114 kg | 0.503 kg | 10.012 kg, buoyancy +2 N |
-| Actuators (order) | 0 FR ccw, 1 RL ccw, 2 FL cw, 3 RR cw (PX4) | 0 FR ccw, 1 FL cw, 2 RL ccw, 3 RR cw (Parrot) | 4 horizontal T200 at 45° (0 FR, 1 FL, 2 RR, 3 RL) and 2 vertical (4 R, 5 L) (ArduSub) |
-| `motor_constant` | 8.55e-6 N/(rad/s)² | 1.90e-6 N/(rad/s)² | 0.002 N/(rad/s)², ±40 N |
-| Hover / max | 778 / 1000 rad/s (T/W 1.65) | 805 / 1250 rad/s (T/W 2.4) | reversible, ±141 rad/s |
+| Model | Holybro X500 (PX4) | Parrot Bebop 2 | Blue Robotics BlueROV2 Heavy (8 thrusters, PX4 model) |
+| Mass | 2.114 kg | 0.503 kg | 13.4 kg, buoyancy +0.98 N |
+| Actuators (order) | 0 FR ccw, 1 RL ccw, 2 FL cw, 3 RR cw (PX4) | 0 FR ccw, 1 FL cw, 2 RL ccw, 3 RR cw (Parrot) | 4 horizontal at 45° (0 FR, 1 FL, 2 RR, 3 RL) and 4 vertical at the corners (4 FR up, 5 FL down, 6 RR down, 7 RL up) (PX4) |
+| `motor_constant` | 8.55e-6 N/(rad/s)² | 1.90e-6 N/(rad/s)² | 0.002 N/(rad/s)², ±49.7 N |
+| Hover / max | 778 / 1000 rad/s (T/W 1.65) | 805 / 1250 rad/s (T/W 2.4) | reversible, ±158 rad/s |
 | Controller / output | Cascade / MotorSpeed | Cascade / MotorSpeed | Underwater / Thruster |
 | IMU, magnetometer | 250, 50 Hz | 250, 50 Hz | 250, 50 Hz |
 | Barometer, GPS | 50, 10 Hz | 50, 10 Hz | |
@@ -404,25 +405,23 @@ Data sources:
   [bebop2_aerodynamic_model](https://bitbucket.org/SihaoSun/bebop2_aerodynamic_model)).
   Parrot rotor order and spin directions, as in BebopS. Details are in the header of
   [`bebop2.urdf.xacro`](pilotaro_description/urdf/bebop2.urdf.xacro).
-- **bluerov2:**
-  - From C. McQueen's [bluerov2_gz](https://github.com/clydemcqueen/bluerov2_gz) model
-    (MIT): rigid body (mass, inertia, center of mass), thruster position, orientation and
-    direction, and the T200 coefficient.
-  - From C.-J. Wu's thesis (Flinders University, 2018, tables 5.1–5.3): added mass, linear
-    and quadratic damping and net buoyancy, identified for the BlueROV2 (Heavy hull).
-  - From P. J. Pereira's [bluerov_ros_playground](https://github.com/patrickelectric/bluerov_ros_playground)
-    (Blue Robotics, LGPL v3): the visual mesh, rotated to the `base_link` frame (it is
-    y-forward, z-down), with its full detail (512k triangles, 20 MB). It lives in
-    [`meshes/bluerov2`](pilotaro_description/meshes/bluerov2/README.md) and keeps its LGPL v3
-    license; the rest of pilotaro stays Apache 2.0.
-  - That model also confirms the geometry used here: overall size 0.457 × 0.344 × 0.254 m,
-    and thruster moment arms of 0.167 m in yaw and 0.111 m in roll (0.164 and 0.109 m in
-    this URDF).
-  - The T200 pushes harder forwards than backwards (+49.98 / −40.18 N in that model). The
-    URDF limits both directions to 40 N, so the allocation stays symmetric.
+- **bluerov2_heavy:** the same vehicle as PX4's `uuv_bluerov2_heavy` model
+  ([PX4-gazebo-models](https://github.com/PX4/PX4-gazebo-models), BSD 3-Clause; airframe
+  `60002_gz_uuv_bluerov2_heavy`), so that pilotaro and PX4 can be compared on one platform:
+  - Rigid body: 13 kg hull with inertia (0.250, 0.221, 0.356) kg·m² plus 8 thrusters of
+    0.05 kg. The thruster links here weigh 2 g, so the hull is set for the same totals:
+    13.4 kg and (0.263, 0.229, 0.375) kg·m² about the center of mass.
+  - Thruster positions, orientations and spin directions of the PX4 model.
+  - Added mass, linear and quadratic damping of the PX4 model.
+  - Buoyancy: its 0.50 × 0.25 × 0.108 m box, 2 cm above `base_link`: +0.98 N net.
+  - Thrust limit: the PX4 thrust polynomials give +66.5 / −49.7 N at full command; the URDF
+    limits both directions to 49.7 N, so the allocation stays symmetric.
+  - Visual: the PX4 meshes, in
+    [`meshes/bluerov2_heavy`](pilotaro_description/meshes/bluerov2_heavy/README.md), which
+    keep their BSD 3-Clause license; the rest of pilotaro stays Apache 2.0.
 
 The x500 and Bebop 2 meshes are downloaded from Fuel the first time (an internet connection
-is needed); the BlueROV2 mesh is installed with `pilotaro_description`. With
+is needed); the BlueROV2 Heavy meshes are installed with `pilotaro_description`. With
 `cameras:=false` the models have no cameras, which makes multi-drone simulations much
 lighter.
 
@@ -437,12 +436,12 @@ look at with the camera and the echosounder.
 In the URDF, each underwater vehicle has:
 
 - **Buoyancy:** the volume of its `base_link` collisions times the water density. On the
-  BlueROV2, the main box is sized so that buoyancy equals the weight plus 2 N. Its center of
-  buoyancy is 4.4 cm above the center of mass, which stabilizes roll and pitch.
+  BlueROV2 Heavy, the box gives the weight plus 0.98 N, with its center 2 cm above the
+  center of mass, which stabilizes roll and pitch.
 - **Hydrodynamics:** `Hydrodynamics` system with linear and quadratic damping,
   `pilotaro_hydrodynamics` macro.
 - **Added mass:** the plugin's explicit computation is unstable when it exceeds the link
-  mass, and on the BlueROV2 it does in sway and heave (12.7 and 14.6 kg vs. 10 kg). So it is
+  mass, as it does in sway and heave on light ROV hulls. So it is
   disabled in the plugin (`disable_added_mass`) and `spawn.launch.py` passes it to the
   link's `<fluid_added_mass>` when generating the SDF. There DART integrates it implicitly
   and stably.
@@ -451,7 +450,7 @@ In the URDF, each underwater vehicle has:
 For an underwater vehicle:
 
 - **"Takeoff"** with negative `takeoff_altitude`: dives that depth from the arming point
-  (2 m on the BlueROV2).
+  (2 m on the BlueROV2 Heavy).
 - **"Landing":** descends at `landing_speed` until it rests on the bottom, then disarms.
 - **Surfacing:** with offboard or, with positive buoyancy, by disarming.
 
@@ -501,7 +500,7 @@ allocation accounts for it.
 1. Write `urdf/<vehicle>.urdf.xacro` with the macros in `common.xacro`: one
    `pilotaro_rotor` per motor (multirotor) or one `pilotaro_thruster` per thruster, with
    `pilotaro_hydrodynamics` (underwater), and whatever sensors it has. See
-   `bebop2.urdf.xacro` and `bluerov2.urdf.xacro` as examples.
+   `bebop2.urdf.xacro` and `bluerov2_heavy.urdf.xacro` as examples.
 2. Generate its parameters: `./update_vehicle_params.py --vehicle <vehicle>`. The file is
    created if it does not exist.
 3. Add its resting height to `SPAWN_HEIGHT` in `pilotaro_gazebo/launch/spawn.launch.py` and
@@ -521,8 +520,9 @@ allocation accounts for it.
   They cover:
   - types and estimator;
   - both controllers: the multirotor one with the Bebop 2 parameters and a hexarotor; the
-    underwater one with the BlueROV2 geometry, checking the actuated DOF, buoyancy
-    feed-forward, rotation to the body frame and saturation;
+    underwater one with the BlueROV2 Heavy (all 6 DOF) and a 6-thruster BlueROV2 (pitch not
+    actuated) geometry, checking the actuated DOF, buoyancy feed-forward, rotation to the
+    body frame and saturation;
   - the mode state machine, including diving;
   - the output plugins;
   - URDF ↔ parameters consistency for each vehicle.
@@ -559,27 +559,28 @@ allocation accounts for it.
   | Yaw 90° | 0.0° | 0.0° |
   | Landing | DISARMED | DISARMED |
 
-  BlueROV2 in the underwater world:
+  BlueROV2 Heavy in the underwater world:
 
   ```bash
-  ros2 launch pilotaro_gazebo sim.launch.py headless:=true world:=underwater robots:=rov1:bluerov2
+  ros2 launch pilotaro_gazebo sim.launch.py headless:=true world:=underwater robots:=rov1:bluerov2_heavy
   ros2 run pilotaro_gazebo flight_check.py rov1 --takeoff-altitude -2.0 --goal-time 15 \
-    --landing-time 80 --max-rotor-speed 141.5 --expect-float -0.0907 --expect-ascent 0.173
+    --landing-time 80 --max-rotor-speed 157.7 --expect-float -0.0732 --expect-ascent 0.0412
   ```
 
   Expected values, computed by hand:
-  - **floating:** z = −0.0907 m, the submerged volume that balances the weight;
-  - **passive ascent:** 36.99·w² + 5.18·w = 2 N gives w = 0.173 m/s.
+  - **floating:** z = −0.0732 m, the submerged volume (13.4 dm³ of the 13.5 dm³ box) that
+    balances the weight;
+  - **passive ascent:** 19.0·w² + 23.0·w = 0.98 N gives w = 0.0412 m/s.
 
-  | | bluerov2 |
+  | | bluerov2_heavy |
   |---|---|
-  | Floating, disarmed | z = −0.091 m (expected −0.091), still |
-  | Dive to 2 m | z = −2.082 m (target −2.091) |
-  | Depth-hold drift (5 s) | 0.5 cm |
-  | Offboard goal (2, 1, 1) m: error / overshoot | 0.3 cm / 1.6 cm |
+  | Floating, disarmed | z = −0.073 m (expected −0.073), still |
+  | Dive to 2 m | z = −2.072 m (target −2.073) |
+  | Depth-hold drift (5 s) | 0.1 cm |
+  | Offboard goal (2, 1, 1) m: error / overshoot | 0.3 cm / 0.2 cm |
   | Yaw 90° | 0.0° |
-  | Descent to the bottom | DISARMED at z = −9.89 m (skids on the sand at −10) |
-  | Passive ascent | 0.173 m/s (expected 0.173) |
+  | Descent to the bottom | DISARMED at z = −9.97 m |
+  | Passive ascent | 0.041 m/s (expected 0.041) |
 
 ### Continuous integration
 
@@ -593,7 +594,7 @@ container, without a GPU, it:
 3. runs the unit tests (`colcon test` + `colcon test-result --verbose`);
 4. flies the x500 and the Bebop 2 together in the `empty` world with `flight_check.py`
    (Gazebo headless, `cameras:=false`);
-5. flies the BlueROV2 in the `underwater` world (it needs water to float) with
+5. flies the BlueROV2 Heavy in the `underwater` world (it needs water to float) with
    `flight_check.py`, including the floating and passive ascent checks.
 
 Any failed check fails the run, and the colcon and simulation logs are uploaded as the
@@ -616,7 +617,7 @@ Third-party content keeps its own license:
 
 | Component | Where | Source | License |
 |---|---|---|---|
-| BlueROV2 visual mesh | [`pilotaro_description/meshes/bluerov2`](pilotaro_description/meshes/bluerov2/README.md) (distributed, modified) | [bluerov_ros_playground](https://github.com/patrickelectric/bluerov_ros_playground), P. J. Pereira, Blue Robotics | LGPL v3 ([`COPYING.LESSER`](pilotaro_description/meshes/bluerov2/COPYING.LESSER), [`COPYING`](pilotaro_description/meshes/bluerov2/COPYING)) |
+| BlueROV2 Heavy meshes | [`pilotaro_description/meshes/bluerov2_heavy`](pilotaro_description/meshes/bluerov2_heavy/README.md) (distributed, unmodified) | [PX4-gazebo-models](https://github.com/PX4/PX4-gazebo-models) `uuv_bluerov2_heavy`, N. De Carli (KTH), PX4 Autopilot | BSD 3-Clause ([`LICENSE`](pilotaro_description/meshes/bluerov2_heavy/LICENSE)) |
 | x500 meshes | Downloaded from Fuel at run time, not distributed | [PX4 x500](https://app.gazebosim.org/PX4/fuel/models/x500), Benjamin Perseghetti | CC-BY 4.0 |
 | Bebop 2 meshes | Downloaded from Fuel at run time, not distributed | [Parrot Bebop 2](https://app.gazebosim.org/OpenRobotics/fuel/models/Parrot%20Bebop%202), Open Robotics | CC0 |
 | Simulation screenshots | [`docs/images`](docs/images) | Gazebo renders of pilotaro | Apache 2.0; each vehicle shown keeps the license of its mesh (rows above) |
@@ -624,6 +625,5 @@ Third-party content keeps its own license:
 Physical parameters taken from other works (masses, inertias, thruster geometry, rotor and
 hydrodynamic coefficients) are cited where they are used, in the header of each
 `urdf/<vehicle>.urdf.xacro` and in [Vehicles](#vehicles): the PX4 x500 model (CC-BY 4.0),
-the Parrot Bebop 2 model of Open Robotics (CC0), S. Sun et al. (TU Delft, 2019),
-[bluerov2_gz](https://github.com/clydemcqueen/bluerov2_gz) (C. McQueen, MIT) and C.-J. Wu
-(Flinders University, 2018).
+the Parrot Bebop 2 model of Open Robotics (CC0), S. Sun et al. (TU Delft, 2019) and the PX4
+`uuv_bluerov2_heavy` model (PX4-gazebo-models, BSD 3-Clause).

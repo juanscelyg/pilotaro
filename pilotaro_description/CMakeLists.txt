@@ -30,7 +30,7 @@ install(PROGRAMS
 if(BUILD_TESTING)
   # Each vehicle: its URDF expands with xacro, has the motor plugins the script needs and
   # config/<vehicle>.params.yaml is in sync with it
-  foreach(vehicle x500 bebop2 bluerov2)
+  foreach(vehicle x500 bebop2 bluerov2_heavy)
     add_test(
       NAME ${vehicle}_vehicle_params_match_urdf
       COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/scripts/update_vehicle_params.py --check

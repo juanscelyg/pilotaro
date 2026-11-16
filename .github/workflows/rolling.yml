@@ -81,18 +81,18 @@ jobs:
           kill -INT $launch; wait $launch
           exit $rc
 
-      - name: Flight test, BlueROV2 underwater
+      - name: Flight test, BlueROV2 Heavy underwater
         run: |
           source install/setup.bash
           mkdir -p log/sim
           ros2 launch pilotaro_gazebo sim.launch.py headless:=true cameras:=false \
-            world:=underwater robots:=rov1:bluerov2 > log/sim/underwater.log 2>&1 &
+            world:=underwater robots:=rov1:bluerov2_heavy > log/sim/underwater.log 2>&1 &
           launch=$!
           set +e
           timeout 600 bash -c 'until ros2 service list 2>/dev/null | grep /rov1/arming > /dev/null; do sleep 2; done'
           timeout 1200 ros2 run pilotaro_gazebo flight_check.py rov1 --takeoff-altitude -2.0 \
-            --goal-time 15 --landing-time 80 --max-rotor-speed 141.5 \
-            --expect-float -0.0907 --expect-ascent 0.173
+            --goal-time 15 --landing-time 80 --max-rotor-speed 157.7 \
+            --expect-float -0.0732 --expect-ascent 0.0412
           rc=$?
           kill -INT $launch; wait $launch
           exit $rc

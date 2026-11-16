@@ -3,13 +3,13 @@
 <package format="3">
   <name>pilotaro_description</name>
   <version>0.0.0</version>
-  <description>pilotaro description: URDF of the Holybro X500 with its sensors, and a script that updates the vehicle parameters of pilotaro from the URDF.</description>
+  <description>pilotaro description: URDF of the vehicles (Holybro X500, Parrot Bebop 2, BlueROV2 Heavy) with their sensors, and a script that updates the vehicle parameters of pilotaro from the URDF.</description>
 
   <maintainer email="juanscelyg@gmail.com">Juan S. Cely G.</maintainer>
 
   <license>Apache License 2.0</license>
-  <!-- meshes/bluerov2/bluerov2.glb only: derived from bluerov_ros_playground -->
-  <license file="meshes/bluerov2/COPYING.LESSER">LGPLv3</license>
+  <!-- meshes/bluerov2_heavy only: from PX4-gazebo-models -->
+  <license file="meshes/bluerov2_heavy/LICENSE">BSD-3-Clause</license>
 
   <author>Juan S. Cely G.</author>
 
