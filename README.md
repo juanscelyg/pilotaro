@@ -38,7 +38,9 @@ Autopilot for multirotors and underwater vehicles on ROS 2. It is driven with
 ## Quick start
 
 ```bash
-cd ~/ws/fleet_ws
+cd ~/ros_ws   # your colcon workspace, with pilotaro cloned in src/
+rosdep update
+rosdep install -y --ignore-src --from-paths src
 colcon build --packages-up-to pilotaro pilotaro_gazebo
 source install/setup.bash
 
@@ -117,7 +119,7 @@ in `params/pilotaro.params.yaml`.
 | `pilotaro pilotaro.launch.py` | pilotaro only (`robot_name`, `vehicle`, `params_file`, `vehicle_params_file`, `use_sim_time`). This is the one used on the real robot. |
 | `pilotaro_gazebo spawn.launch.py` | Adds a vehicle to a running Gazebo: `robot_state_publisher`, spawn, bridge and pilotaro (`robot_name`, `model`, `world_name`, `x`, `y`, `z`, `yaw`, `cameras`, `params_file`). The bridge is generated from the sensors in the URDF. |
 | `pilotaro_gazebo sim.launch.py` | Gazebo with `worlds/empty.sdf`, `/clock` bridge and one or more drones (`robots`, `model`, `spacing`, `headless`…). |
-| `pilotaro_gazebo disaster.launch.py` | `disaster_nathan_benderson_park_world` world (`disaster_world` package) with one vehicle at (-120, 950) (`model`). |
+| `pilotaro_gazebo disaster.launch.py` | `disaster_nathan_benderson_park_world` world (`disaster_world` package, optional: not a declared dependency, clone it into `src/` to use this launch) with one vehicle at (-120, 950) (`model`). |
 
 ## Multi-robot: platform name
 
@@ -586,8 +588,7 @@ ROS 2 Rolling. It runs on every push and pull request to `rolling`, every Monday
 changes daily) and on demand (*Actions → rolling → Run workflow*). In a `ros:rolling`
 container, without a GPU, it:
 
-1. installs the dependencies with `rosdep`, skipping `disaster_world`: the tests do not use
-   it (only `disaster.launch.py` does);
+1. installs the dependencies with `rosdep`;
 2. builds every package;
 3. runs the unit tests (`colcon test` + `colcon test-result --verbose`);
 4. flies the x500 and the Bebop 2 together in the `empty` world with `flight_check.py`
@@ -602,7 +603,7 @@ Any failed check fails the run, and the colcon and simulation logs are uploaded 
 docker run --rm -it -v $PWD:/ws/src/pilotaro -w /ws ros:rolling bash
 # inside the container, the "run" blocks of rolling.yml in order, e.g.:
 apt-get update && rosdep update
-rosdep install -y --ignore-src --from-paths src --skip-keys disaster_world
+rosdep install -y --ignore-src --from-paths src
 source /opt/ros/rolling/setup.bash && colcon build
 ```
 

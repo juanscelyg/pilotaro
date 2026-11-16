@@ -48,14 +48,11 @@ jobs:
         with:
           path: src/pilotaro
 
-      # disaster_world is only used by pilotaro_gazebo/launch/disaster.launch.py, not by these
-      # tests, and it is not released as a binary: skip it
       - name: Install system dependencies
         run: |
           apt-get update
           rosdep update --rosdistro "$ROS_DISTRO"
-          rosdep install -y --ignore-src --from-paths src --rosdistro "$ROS_DISTRO" \
-            --skip-keys disaster_world
+          rosdep install -y --ignore-src --from-paths src --rosdistro "$ROS_DISTRO"
 
       - name: Build
         run: |
