@@ -27,13 +27,13 @@ Autopilot for multirotors and underwater vehicles on ROS 2. It is driven with
 | `pilotaro` | Metapackage: `launch/pilotaro.launch.py` and `params/pilotaro.params.yaml`. |
 | `pilotaro_common` | ROS-free types: `RobotState`, `VehicleState`, `ControlSetpoint`, `VehicleParams`, `FlightMode`. |
 | `pilotaro_core` | Plugin interfaces: `StateEstimatorBase`, `ControllerBase`, `ActuatorOutputBase`, and parameter loading. |
-| `pilotaro_estimators` | `EstimatorNode` (loads the plugin) and the `OdometryEstimator` plugin. |
+| `pilotaro_estimators` | `EstimatorNode` (loads the plugin, publishes the estimate) and the `OdometryEstimator` and `InsEkfEstimator` (IMU-driven EKF) plugins. |
 | `pilotaro_controllers` | `ControllersNode` (loads the plugin) and the `CascadeController` (multirotors) and `UnderwaterController` (vectored thrusters) plugins. |
 | `pilotaro_states` | `StatesNode`: flight modes, services, offboard setpoints. The logic lives in `FlightModeMachine` (ROS-free, with tests). |
 | `pilotaro_actuators` | `ActuatorsNode` (per-mode policy, loads the plugin) and the `MotorSpeedOutput` and `ThrusterOutput` output plugins. |
 | `pilotaro_system` | `PilotaroNode` (lifecycle) and `pilotaro_main`, the real-time loop. |
 | `pilotaro_description` | Vehicles: `urdf/<vehicle>.urdf.xacro`, `config/<vehicle>.params.yaml`, `meshes/` (BlueROV2 Heavy) and `scripts/update_vehicle_params.py`. |
-| `pilotaro_gazebo` | Empty and underwater worlds, simulation launches (one or several vehicles of any model, disaster world) and `scripts/flight_check.py`. |
+| `pilotaro_gazebo` | Empty and underwater worlds, simulation launches (one or several vehicles of any model, disaster world), `scripts/flight_check.py`, `scripts/mission_check.py` and `scripts/failsafe_check.py`. |
 
 ## Quick start
 
@@ -41,7 +41,7 @@ Autopilot for multirotors and underwater vehicles on ROS 2. It is driven with
 cd ~/ros_ws   # your colcon workspace, with pilotaro cloned in src/
 rosdep update
 rosdep install -y --ignore-src --from-paths src
-colcon build --packages-up-to pilotaro pilotaro_gazebo
+colcon build --packages-up-to pilotaro pilotaro_gazebo --cmake-args -DCMAKE_BUILD_TYPE=Release
 source install/setup.bash
 
 # Gazebo (GUI) + x500 + pilotaro. headless:=true without GUI, cameras:=false without cameras
@@ -53,6 +53,9 @@ ros2 launch pilotaro_gazebo sim.launch.py model:=bebop2 robots:=bebop2
 # A BlueROV2 Heavy in the underwater world (floats at the surface until armed)
 ros2 launch pilotaro_gazebo sim.launch.py world:=underwater robots:=rov:bluerov2_heavy
 ```
+
+Build in `Release`: without a build type colcon compiles without optimization, and the
+control loop and the EKF use several times more CPU.
 
 In another terminal (the namespace is the robot name, `x500` by default):
 
@@ -77,40 +80,119 @@ ARMED --arming--> DISARMED
 any but DISARMED --offboard--> OFFBOARD --(setpoint timeout)--> LOITER
 flying --loiter--> LOITER          flying --landing--> LANDING --(touchdown)--> DISARMED
 armed --(no state estimate for estimate_timeout)--> DISARMED
+flying --(failsafe)--> LOITER, RTL, LANDING or DISARMED (see Failsafes)
+ARMED --mission--> TAKEOFF --> MISSION;  flying --mission--> MISSION
+MISSION --(last waypoint)--> LOITER, RTL or LANDING
+flying --rtl--> RTL --(over the arming point)--> LANDING, DISARMED or LOITER
 ```
 
 | Mode | Vehicle |
 |---|---|
 | `DISARMED` | Motors stopped. |
 | `ARMED` | On the ground (or at the surface), motors at `idle_rot_velocity`. |
-| `TAKEOFF` | Climbs `takeoff_altitude` from the arming point at `takeoff_speed` (dives if negative). |
+| `TAKEOFF` | Climbs `takeoff_altitude` from the arming point at `takeoff_speed` (dives if negative), accelerating and braking at `takeoff_acceleration`; the setpoint never leads the vehicle by more than `takeoff_max_lead`. |
 | `LOITER` | Holds its position and heading. |
 | `LANDING` | Descends at `landing_speed` keeping XY; disarms on touchdown. |
 | `OFFBOARD` | Follows the `offboard/pose` or `offboard/twist` setpoints. |
+| `MISSION` | Flies the waypoints of the `mission` topic in order (see Missions). |
+| `RTL` | Returns to the arming point: climbs to `mission.rtl_altitude` over it if lower, flies back at `mission.rtl_speed` and then lands (`mission.rtl_final_action`). |
 
-`TAKEOFF`, `LOITER`, `LANDING` and `OFFBOARD` are the flying modes. Every service is a
+`TAKEOFF`, `LOITER`, `LANDING`, `OFFBOARD`, `MISSION` and `RTL` are the flying modes. Every service is a
 `std_srvs/Trigger` in the robot namespace; a rejected command answers `success: false` with
 the reason.
 
 | Service | Accepted in | Does |
 |---|---|---|
-| `arming` | `DISARMED` with a state estimate, or `ARMED` | Arms (stores the arming point) or disarms. |
-| `takeoff` | `ARMED` | Goes to `TAKEOFF`. |
+| `arming` | `DISARMED` passing the pre-arm checks, or `ARMED` | Arms (stores the arming point) or disarms. |
+| `takeoff` | `ARMED`, no failsafe holding or landing the vehicle | Goes to `TAKEOFF`. |
 | `loiter` | flying | Holds the current position and heading. |
 | `landing` | flying | Goes to `LANDING`. |
-| `offboard` | any mode but `DISARMED`, with a setpoint newer than `offboard_timeout` | Goes to `OFFBOARD`. |
+| `offboard` | any mode but `DISARMED`, with a setpoint newer than `offboard_timeout` and no failsafe holding or landing the vehicle | Goes to `OFFBOARD`. |
+| `mission` | `ARMED` (takes off first) or flying, with a mission inside the geofence and no failsafe holding or landing the vehicle | Goes to `MISSION`. |
+| `rtl` | flying | Goes to `RTL`. |
 
 | Topic | Type | |
 |---|---|---|
 | `mode` | `std_msgs/String` | Current mode (transient local: late subscribers get it). |
 | `offboard/pose` | `geometry_msgs/PoseStamped` | Position and yaw in the world frame. With `offboard_frame_id` set, other frames are ignored. |
 | `offboard/twist` | `geometry_msgs/Twist` | Linear velocity in the world frame and yaw rate (`angular.z`). |
+| `estimate` | `nav_msgs/Odometry` | State estimate used by the controller: pose in the world frame, twist in the body frame (REP 147), stamp of the estimate; the horizontal uncertainty in the pose covariance. |
+| `mission` | `nav_msgs/Path` | Waypoints in the world frame (position, and yaw if the orientation is set). Transient local: publish it once. Not replaced while it is being flown. |
+| `mission/current` | `std_msgs/Int32` | Waypoint being flown (−1 outside a mission); transient local. |
+| `battery` | `sensor_msgs/BatteryState` | Input: `percentage` (0–1) for the battery failsafes and pre-arm check. |
+| `heartbeat` | `std_msgs/Empty` | Input: ground station heartbeat, if `failsafe.heartbeat_timeout` is set. |
+| `failsafe` | `std_msgs/String` | Active failsafes, comma separated (empty: none); transient local. |
 
 Offboard setpoints must keep arriving (more often than every `offboard_timeout`, 0.5 s by
 default); if they stop, the vehicle holds its position in `LOITER`. Touchdown is detected
 when the vehicle stays within `land_detect_altitude` of the arming point, slower than
 `land_detect_speed`, for `land_detect_time`. All these parameters belong to `states_node`
 in `params/pilotaro.params.yaml`.
+
+### Failsafes
+
+Each failsafe has a condition and an action (`failsafe.*` parameters of `states_node`):
+`none`, `warn` (only reported), `loiter`, `rtl`, `land` or `disarm`. The strongest active action
+is applied. While it lasts, the commands that would undo it (`takeoff`, `offboard`) are
+rejected; `landing` is always accepted. The active failsafes are published on `failsafe`
+and logged. The parameters can be changed in flight (`ros2 param set`).
+
+| Failsafe | Condition | Default action |
+|---|---|---|
+| `battery_low` / `battery_critical` | charge ≤ `battery_low` (0.2) / `battery_critical` (0.1) | `warn` / `land` |
+| `battery_lost` | battery reported once, then silent for `battery_timeout` (2 s) | `warn` |
+| `geofence` | beyond `geofence_radius`, `geofence_max_height` or `geofence_max_depth` from the arming point by more than `geofence_margin` (0.3 m); all off by default | `loiter` inside the fence |
+| `navigation` | horizontal uncertainty of the estimate > `max_position_std` (1 m) | `land` level, without horizontal control |
+| `heartbeat` | no ground station heartbeat for `heartbeat_timeout` (off by default) | `loiter` |
+| `attitude` | tilt > `max_tilt` (1.2 rad) for `max_tilt_time` (0.3 s): flip, lost motor | `disarm` |
+| (state estimate lost) | no estimate for `estimate_timeout` | disarm |
+
+- **Geofence:** offboard goals and the takeoff altitude are clamped to it, so the vehicle
+  stops at the fence instead of crossing it. The failsafe only acts if it is pushed or flown
+  (velocity setpoints) out.
+- **Navigation lost:** `InsEkfEstimator` reports an unknown position when it has had no
+  GNSS or odometry for `aiding_timeout` (5 s), as EKF2 does. Without a valid horizontal
+  estimate, holding a position would chase a drifting estimate, so the vehicle descends
+  level, without horizontal control (`ControlSetpoint::xy_velocity = false`), like the
+  *Descend* mode of PX4. In simulation, with GNSS cut 5 s after hovering, the x500 lands
+  1–3 m from where it was.
+- **Underwater vehicles:** `land` takes them to the bottom. `bluerov2_heavy.params.yaml`
+  uses `disarm` for battery and navigation, so the positively buoyant vehicle surfaces.
+
+### Missions and return to launch
+
+A mission is a list of waypoints (`nav_msgs/Path` on `mission`); the `mission` service flies
+it, taking off first if the vehicle is on the ground. The setpoint travels each leg in a
+straight line at `mission.speed`, accelerating and braking at `mission.acceleration`, with
+the profile acceleration as feed-forward (`ControlSetpoint::acceleration`, jerk limited to
+3 m/s³) and the commanded speed capped at it (`ControlSetpoint::max_speed`). It waits for a
+vehicle that lags more than `mission.max_lead`, and consecutive legs share their corner, so
+the path stays on the lines between waypoints. A waypoint is reached within
+`mission.acceptance_radius` and below `mission.acceptance_speed`, after
+`mission.hold_time`. After the last one
+`mission.end_action` applies: `loiter` (default), `rtl` or `land`.
+
+`rtl` (service, end of mission or failsafe action) climbs to `mission.rtl_altitude` over the
+arming point if lower (never descends; 0 returns at the current height), flies back at
+`mission.rtl_speed` and then applies `mission.rtl_final_action`: `land` (default, on the
+arming point itself), `disarm` or `loiter`. The BlueROV2 Heavy returns at its depth and disarms, surfacing by its buoyancy.
+A mission with a waypoint outside the geofence is rejected, and without a valid position an
+`rtl` failsafe lands instead.
+
+```bash
+ros2 topic pub --once /x500/mission nav_msgs/msg/Path "{header: {frame_id: odom}, poses: [
+  {pose: {position: {x: 4.0, y: 0.0, z: 3.0}}},
+  {pose: {position: {x: 4.0, y: 4.0, z: 3.0}, orientation: {z: 0.707, w: 0.707}}},
+  {pose: {position: {x: 0.0, y: 4.0, z: 2.0}}}]}" --qos-durability transient_local
+ros2 service call /x500/arming std_srvs/srv/Trigger
+ros2 service call /x500/mission std_srvs/srv/Trigger     # takes off and flies it
+ros2 service call /x500/rtl std_srvs/srv/Trigger         # or return at any time
+```
+
+**Pre-arm checks** (`arming` answers with every failed check): fresh estimate; tilt below
+`max_tilt_arming` (0.35 rad) and angular velocity below `max_rate_arming` (0.3 rad/s);
+horizontal uncertainty below `max_position_std`; battery (if reported) fresh and above
+`battery_min_arm` (0.3); ground station heartbeat (if enabled).
 
 ### Launch files
 
@@ -165,7 +247,8 @@ Each instance loads two files, in this order:
 
 `pilotaro_main` does everything in a single thread, at `frequency` Hz (250 by default): it
 collects messages and service calls and runs the estimator → states → controller → actuators
-cycle. Between configure and activate (plugins already loaded, before the vehicle can move)
+cycle. With `use_sim_time` the loop follows the simulation clock (`/clock`), so it keeps its
+rate in simulated time whatever the real time factor; on a robot it follows the wall clock. Between configure and activate (plugins already loaded, before the vehicle can move)
 it applies the `real_time.*` configuration:
 
 | Parameter | Default | Effect |
@@ -252,7 +335,7 @@ them reads `<plugin_name>.plugin`, and the plugin reads its parameters with the 
 
 | Node | Interface | Plugins |
 |---|---|---|
-| `estimator_node` | `pilotaro::StateEstimatorBase` | `pilotaro_estimators/OdometryEstimator` |
+| `estimator_node` | `pilotaro::StateEstimatorBase` | `pilotaro_estimators/OdometryEstimator`, `pilotaro_estimators/InsEkfEstimator` |
 | `controllers_node` | `pilotaro::ControllerBase` | `pilotaro_controllers/CascadeController`, `pilotaro_controllers/UnderwaterController` |
 | `actuators_node` | `pilotaro::ActuatorOutputBase` | `pilotaro_actuators/MotorSpeedOutput`, `pilotaro_actuators/ThrusterOutput` |
 
@@ -272,12 +355,74 @@ The rest of the system runs at the pace of the estimates: the controller only ru
 estimate, and its `dt` is the difference between their stamps. If no estimates arrive for
 `estimate_timeout` while the vehicle is armed, it disarms.
 
+### Estimator: `pilotaro_estimators/InsEkfEstimator`
+
+Inertial navigation with the vehicle's own sensors: an error-state EKF (16 states: position,
+velocity, attitude, accelerometer and gyro biases, barometer offset) that integrates the IMU
+and corrects it with GNSS, barometer, magnetometer and, optionally, an external odometry
+(VIO, DVL + USBL, motion capture...). It gives an estimate on every IMU sample.
+
+- **Start:** once the vehicle has been still for `init_time`. Roll and pitch come from the
+  accelerometer, the gyro bias from the mean gyro, the yaw from the magnetometer (or the
+  odometry), the position from the first GNSS fix (or the odometry).
+- **Magnetometer:** the direction of the field is fused in 3D (body = Rᵀ·world), which
+  keeps tilt and heading consistent; only its horizontal direction (`mag_heading`) has to
+  be given, its inclination is measured at the start.
+- **Outliers and recovery:** measurements beyond `innovation_gate` sigmas are rejected. If a
+  sensor keeps being rejected for `reset_timeout`, its state (position, velocity or
+  barometer offset) is reset to it, as EKF2 does. This recovers, for instance, from a
+  touchdown the IMU did not sample.
+- **Cost:** about 0.2 % of a core at 250 Hz (Release build).
+
+| Parameter | Default | |
+|---|---|---|
+| `imu_topic`, `gnss_topic`, `baro_topic`, `mag_topic` | `imu`, `navsat`, `air_pressure`, `magnetometer` | Empty disables the sensor (except the IMU). |
+| `gnss_velocity_topic`, `odometry_topic` | `""` | GNSS velocity (`TwistWithCovarianceStamped`, ENU) and external odometry. |
+| `gnss_origin` | `[]` | `[lat, lon, alt]` of the world origin; empty: the first fix. |
+| `gnss_noise`, `gnss_velocity_noise` | `[0.5, 1.0]` m, `0.1` m/s | Horizontal and vertical. |
+| `baro_noise`, `sea_level_pressure` | `0.5` m, `101325` Pa | |
+| `mag_heading`, `mag_noise` | `0` rad, `0.05` | Direction of the horizontal field from world x (π/2 − declination in ENU); noise of the unit field vector. |
+| `odometry_position_noise`, `odometry_velocity_noise`, `odometry_attitude_noise`, `odometry_yaw_noise` | `0.05` m, `0`, `0`, `0` | 0 = not fused. |
+| `gyro_noise`, `accel_noise` | `1e-3`, `4e-3` | Process noise densities (rad/s/√Hz, m/s²/√Hz). |
+| `gyro_bias_noise`, `accel_bias_noise`, `baro_bias_noise` | `1e-5`, `1e-4`, `5e-3` | Random walk of the biases. |
+| `innovation_gate`, `reset_timeout`, `init_time` | `5` σ, `1` s, `1` s | |
+
+```yaml
+/**/estimator_node:
+  ros__parameters:
+    estimator:
+      plugin: "pilotaro_estimators/InsEkfEstimator"
+      gnss_origin: [40.2849, -3.8211, 650.0]   # spherical_coordinates of the world
+      mag_heading: 0.0448                      # horizontal field of the gz world, from x
+```
+
 ### Controller: `pilotaro_controllers/CascadeController`
 
 Cascade controller for multirotors: position P → velocity PI → thrust → SO(3) attitude
 PD → allocation. Allocation uses the pseudoinverse, so it supports any planar geometry with 4 or
 more rotors (there is a test with a hexarotor). Its gains and limits are in the `controller`
 block. It only accepts rotors that push towards +z and are not reversible.
+
+- **Yaw within the rotor authority:** the yaw error commands a yaw rate limited to
+  `max_yaw_rate` (1 rad/s, 0 = no limit); while not limited it is the same PD law.
+- **Desaturation by priorities:** when the rotors cannot give the whole wrench, roll and
+  pitch come first (the collective thrust moves to make them fit, and they are scaled down
+  only if the difference between rotors does not fit), then as much yaw torque as fits in
+  the remaining margin. A large yaw step no longer takes thrust or attitude away: on the
+  x500, the time with saturated motors in a 90° yaw went from 0.37 s to 0.10 s.
+
+Both controllers share two features:
+
+- **Filtered measurements:** first-order low-pass filters on the measured velocity
+  (`velocity_cutoff`, 10 Hz) and angular velocity (`angular_rate_cutoff`, 10 Hz), and
+  optionally on the position (`position_cutoff`, 0 = off). Estimation noise would otherwise
+  reach the actuators: with estimator-like noise they cut the motor activity by two thirds.
+  At 5 Hz the velocity filter delayed the settling (±5 cm in 3.0 s instead of 2.2 s).
+- **Straight-line approach:** with a position setpoint on the 3 axes, the velocity setpoint
+  points at the goal and the whole vector is scaled down to the speed limits (and to
+  `ControlSetpoint::max_speed`, used by missions), so the vehicle moves along the straight
+  line to it. Within 1 m of the goal the gain blends back into the gain of each axis, so
+  every axis converges at its own rate.
 
 ### Controller: `pilotaro_controllers/UnderwaterController`
 
@@ -299,8 +444,8 @@ For vehicles with vectored, reversible thrusters (ROV, AUV). Controls 6 DOF:
 
 Parameters (prefix `controller.`): `position_p`, `velocity_p`, `velocity_i`,
 `velocity_i_max`, `attitude_p`, `angular_rate_p`, `max_horizontal_speed`,
-`max_vertical_speed`, `added_mass`, `added_inertia`, `linear_damping`, `quadratic_damping`
-and `net_buoyancy`.
+`max_vertical_speed`, `added_mass`, `added_inertia`, `linear_damping`, `quadratic_damping`,
+`net_buoyancy`, `position_cutoff`, `velocity_cutoff` and `angular_rate_cutoff`.
 
 The gains in the main file are the multirotor ones, and both controllers share names
 (`position_p`, `velocity_p`…). So when a vehicle file switches controller, it must set all
@@ -386,7 +531,7 @@ barometer, magnetometer, GPS, camera, rangefinder and odometry), and its paramet
 | `motor_constant` | 8.55e-6 N/(rad/s)² | 1.90e-6 N/(rad/s)² | 0.002 N/(rad/s)², ±49.7 N |
 | Hover / max | 778 / 1000 rad/s (T/W 1.65) | 805 / 1250 rad/s (T/W 2.4) | reversible, ±158 rad/s |
 | Controller / output | Cascade / MotorSpeed | Cascade / MotorSpeed | Underwater / Thruster |
-| IMU, magnetometer | 250, 50 Hz | 250, 50 Hz | 250, 50 Hz |
+| IMU, magnetometer | 250, 50 Hz; IMU noise of the PX4 x500 model | 250, 50 Hz | 250, 50 Hz; IMU noise of the PX4 BlueROV2 Heavy model |
 | Barometer, GPS | 50, 10 Hz | 50, 10 Hz | |
 | Front camera `camera_front` | 1280×960, 97°, 30 Hz | 1280×720, 80°, 30 Hz | 1280×720, 80°, 30 Hz |
 | Downward camera `camera_down` | 640×360, 86°, 30 Hz | 320×240 (optical flow), 64°, 30 Hz | |
@@ -518,12 +663,19 @@ allocation accounts for it.
   ```
 
   They cover:
-  - types and estimator;
+  - types and estimators: the INS EKF following a flight with biased, noisy sensors,
+    learning the biases at rest, rejecting outliers and recovering from a state the GNSS
+    keeps contradicting, the 3D magnetometer and orientation updates, and its start-up;
   - both controllers: the multirotor one with the Bebop 2 parameters and a hexarotor; the
     underwater one with the BlueROV2 Heavy (all 6 DOF) and a 6-thruster BlueROV2 (pitch not
     actuated) geometry, checking the actuated DOF, buoyancy feed-forward, rotation to the
-    body frame and saturation;
-  - the mode state machine, including diving;
+    body frame and saturation; the multirotor desaturation (thrust and roll kept under an
+    excessive yaw torque) and the yaw rate limit;
+  - the measurement filters and the straight-line velocity setpoint (`test_shaping`);
+  - the mode state machine, including diving and the takeoff profile (acceleration, braking
+    and no lead over a vehicle still on the ground), the pre-arm checks and every failsafe
+    (battery, geofence and depth limit, navigation, ground station link, flip), missions
+    (from the ground, straight legs at the mission speed, geofence) and return to launch;
   - the output plugins;
   - URDF ↔ parameters consistency for each vehicle.
 - **Flight test** ([`flight_check.py`](pilotaro_gazebo/scripts/flight_check.py)): flies all
@@ -552,10 +704,10 @@ allocation accounts for it.
 
   | | x500 | bebop2 |
   |---|---|---|
-  | Altitude after takeoff | 2.229 m (target 2.227) | 2.041 m (target 2.051) |
-  | Hover drift (5 s) | 3.1 cm | 0.7 cm |
+  | Altitude after takeoff | 2.229 m (target 2.227) | 2.044 m (target 2.051) |
+  | Hover drift (5 s) | 2.1 cm | 0.5 cm |
   | Rotors in hover | 769 rad/s | 819 / 818 / 792 / 793 rad/s |
-  | Offboard goal (2, 1, 1) m: error / overshoot | 0.7 cm / 1.1 cm | 3.1 cm / 5.1 cm |
+  | Offboard goal (2, 1, 1) m: error / overshoot | 0.6 cm / 1.4 cm | 3.2 cm / 7.0 cm |
   | Yaw 90° | 0.0° | 0.0° |
   | Landing | DISARMED | DISARMED |
 
@@ -575,12 +727,37 @@ allocation accounts for it.
   | | bluerov2_heavy |
   |---|---|
   | Floating, disarmed | z = −0.073 m (expected −0.073), still |
-  | Dive to 2 m | z = −2.072 m (target −2.073) |
-  | Depth-hold drift (5 s) | 0.1 cm |
-  | Offboard goal (2, 1, 1) m: error / overshoot | 0.3 cm / 0.2 cm |
+  | Dive to 2 m | z = −2.067 m (target −2.073) |
+  | Depth-hold drift (5 s) | 0.4 cm |
+  | Offboard goal (2, 1, 1) m: error / overshoot | 0.2 cm / 0.0 cm |
   | Yaw 90° | 0.0° |
   | Descent to the bottom | DISARMED at z = −9.97 m |
   | Passive ascent | 0.041 m/s (expected 0.041) |
+
+- **Mission test** ([`mission_check.py`](pilotaro_gazebo/scripts/mission_check.py)): from
+  the ground, an x500 flies three waypoints and returns to launch (`mission.end_action`
+  `rtl`). Measured with the ground truth: closest approach 6–11 cm to each waypoint,
+  cross-track error up to 0.22 m on its short 4 m legs, top speed 2.16 m/s for a mission
+  speed of 2 m/s, climb to the return height and touchdown on the arming point (0.00 m).
+  On a 10 m square, the same mission flown by PX4 1.17 passes 13–26 cm from the waypoints
+  and takes 28 s, against 3–4 cm and 21 s for pilotaro.
+
+  ```bash
+  ros2 launch pilotaro_gazebo sim.launch.py headless:=true robots:=uav1:x500
+  ros2 run pilotaro_gazebo mission_check.py uav1     # 14/14 checks passed
+  ```
+
+- **Failsafe test** ([`failsafe_check.py`](pilotaro_gazebo/scripts/failsafe_check.py)):
+  injects failures into one robot, setting the failsafe parameters at run time: arming
+  rejected with a low battery; an offboard goal beyond a 3 m geofence stops at the fence;
+  when the ground station heartbeats stop the vehicle loiters, rejects offboard and reports
+  the failsafe, which clears when they come back; with a critical battery it lands and
+  disarms, rejecting takeoff and offboard meanwhile.
+
+  ```bash
+  ros2 launch pilotaro_gazebo sim.launch.py headless:=true robots:=uav1:x500
+  ros2 run pilotaro_gazebo failsafe_check.py uav1     # 13/13 checks passed
+  ```
 
 ### Continuous integration
 
@@ -595,7 +772,9 @@ container, without a GPU, it:
 4. flies the x500 and the Bebop 2 together in the `empty` world with `flight_check.py`
    (Gazebo headless, `cameras:=false`);
 5. flies the BlueROV2 Heavy in the `underwater` world (it needs water to float) with
-   `flight_check.py`, including the floating and passive ascent checks.
+   `flight_check.py`, including the floating and passive ascent checks;
+6. flies a waypoint mission with an x500 and returns to launch with `mission_check.py`;
+7. injects failures into an x500 with `failsafe_check.py`.
 
 Any failed check fails the run, and the colcon and simulation logs are uploaded as the
 `logs` artifact. The same steps can be reproduced locally:
@@ -605,7 +784,7 @@ docker run --rm -it -v $PWD:/ws/src/pilotaro -w /ws ros:rolling bash
 # inside the container, the "run" blocks of rolling.yml in order, e.g.:
 apt-get update && rosdep update
 rosdep install -y --ignore-src --from-paths src
-source /opt/ros/rolling/setup.bash && colcon build
+source /opt/ros/rolling/setup.bash && colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
 
 ## License

@@ -106,6 +106,79 @@ TEST_F(CascadeControllerTest, SpeedsAreSaturated)
   }
 }
 
+// Thrust and torques actually produced by some rotor speeds
+Eigen::Vector4d produced_wrench(const pilotaro::VehicleParams & v, const std::vector<double> & w)
+{
+  Eigen::Vector4d wrench = Eigen::Vector4d::Zero();
+  for (std::size_t i = 0; i < w.size(); ++i) {
+    const double t = v.motor_constant * w[i] * w[i];
+    wrench += Eigen::Vector4d(
+      t, v.rotor_y[i] * t, -v.rotor_x[i] * t, -v.rotor_direction[i] * v.moment_constant * t);
+  }
+  return wrench;
+}
+
+TEST_F(CascadeControllerTest, LargeYawTorqueKeepsThrustAndRoll)
+{
+  // Far more yaw torque than the rotors can give, with some roll
+  const Eigen::Vector4d asked(hover_thrust(), 0.2, 0.0, 5.0);
+  controller_.allocate(asked, speeds_);
+  const Eigen::Vector4d got = produced_wrench(controller_.vehicle(), speeds_);
+  EXPECT_NEAR(got[0], asked[0], 1e-6);
+  EXPECT_NEAR(got[1], asked[1], 1e-6);
+  EXPECT_NEAR(got[2], 0.0, 1e-6);
+  EXPECT_GT(got[3], 0.0);           // as much yaw as fits, in the right direction
+  EXPECT_LT(got[3], asked[3]);
+  for (const double s : speeds_) {
+    EXPECT_GE(s, controller_.vehicle().min_rot_velocity - 1e-9);
+    EXPECT_LE(s, controller_.vehicle().max_rot_velocity + 1e-9);
+  }
+}
+
+TEST_F(CascadeControllerTest, ExcessRollMovesTheCollectiveThrust)
+{
+  // Near full thrust a roll torque only fits by lowering the collective thrust a bit
+  const double max_thrust = 4.0 * controller_.vehicle().motor_constant *
+    std::pow(controller_.vehicle().max_rot_velocity, 2);
+  const Eigen::Vector4d asked(0.95 * max_thrust, 0.3, 0.0, 0.0);
+  controller_.allocate(asked, speeds_);
+  const Eigen::Vector4d got = produced_wrench(controller_.vehicle(), speeds_);
+  EXPECT_NEAR(got[1], asked[1], 1e-6);
+  EXPECT_LT(got[0], asked[0]);
+}
+
+TEST_F(CascadeControllerTest, YawRateIsLimited)
+{
+  // Yaw error of 90 degrees while already turning at max_yaw_rate: no more yaw torque
+  setpoint_.yaw = M_PI_2;
+  state_.angular_velocity.z() = CascadeGains().max_yaw_rate;
+  ASSERT_TRUE(controller_.update(state_, setpoint_, 0.004, speeds_));
+  EXPECT_NEAR(produced_wrench(controller_.vehicle(), speeds_)[3], 0.0, 1e-9);
+}
+
+TEST(CascadeController, RejectsYawRateLimitWithoutRateGain)
+{
+  CascadeGains g;
+  g.angular_rate_p.z() = 0.0;
+  CascadeController c;
+  EXPECT_FALSE(c.configure(symmetric_quad(), g));
+  g.max_yaw_rate = 0.0;
+  EXPECT_TRUE(c.configure(symmetric_quad(), g));
+}
+
+TEST_F(CascadeControllerTest, WithoutHorizontalControlItStaysLevel)
+{
+  // Far from the position setpoint and moving: with no horizontal control it does not tilt
+  setpoint_.xy_position = false;
+  setpoint_.xy_velocity = false;
+  setpoint_.position.x() = 5.0;
+  state_.velocity.x() = 2.0;
+  ASSERT_TRUE(controller_.update(state_, setpoint_, 0.004, speeds_));
+  for (const double s : speeds_) {
+    EXPECT_NEAR(s, speeds_[0], 1e-6);
+  }
+}
+
 TEST_F(CascadeControllerTest, RejectsInvalidTimeStep)
 {
   EXPECT_FALSE(controller_.update(state_, setpoint_, 0.0, speeds_));

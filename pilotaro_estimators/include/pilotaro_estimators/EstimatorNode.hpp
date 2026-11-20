@@ -17,6 +17,7 @@
 
 #include <memory>
 
+#include "nav_msgs/msg/odometry.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "rclcpp/macros.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -31,6 +32,10 @@ namespace pilotaro
  * @class EstimatorNode
  * @brief A node that hosts the state estimator plugin and writes its estimates in the
  * robot state.
+ *
+ * Each new estimate is also published on "estimate" (nav_msgs/Odometry: pose in the world
+ * frame, twist in the body frame as in REP 147, stamp of the estimate), for logging and
+ * for other nodes.
  *
  * Parameters: "estimator.plugin" (pluginlib class, e.g.
  * "pilotaro_estimators/OdometryEstimator") and the parameters of the plugin under
@@ -78,6 +83,9 @@ private:
   std::shared_ptr<StateEstimatorBase> estimator_;       ///< Loaded plugin
 
   VehicleState estimate_;       ///< Buffer for the plugin output
+
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr estimate_pub_;  ///< "estimate"
+  nav_msgs::msg::Odometry estimate_msg_;       ///< Buffer for the published estimate
 };
 
 }  // namespace pilotaro

@@ -3,7 +3,7 @@
 <package format="3">
   <name>pilotaro_estimators</name>
   <version>0.0.0</version>
-  <description>pilotaro estimators: node that hosts the state estimator plugin, and the base estimator plugins (OdometryEstimator).</description>
+  <description>pilotaro estimators: node that hosts the state estimator plugin, and the estimator plugins (OdometryEstimator, InsEkfEstimator).</description>
 
   <maintainer email="juanscelyg@gmail.com">Juan S. Cely G.</maintainer>
 
@@ -16,6 +16,9 @@
   <depend>rclcpp</depend>
   <depend>pluginlib</depend>
   <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>eigen</depend>
   <depend>pilotaro_common</depend>
   <depend>pilotaro_core</depend>
 

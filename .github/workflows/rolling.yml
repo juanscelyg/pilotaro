@@ -13,8 +13,9 @@
 # limitations under the License.
 
 # Builds pilotaro on ROS 2 Rolling, runs its unit tests and flies every vehicle in Gazebo
-# (headless) with pilotaro_gazebo/scripts/flight_check.py, which exits with 1 if any check
-# fails. Rolling changes every day, so it also runs every week.
+# (headless) with pilotaro_gazebo/scripts/flight_check.py, flies a waypoint mission with return
+# to launch (mission_check.py) and injects failures into an x500 (failsafe_check.py); each
+# exits with 1 if any check fails. Rolling changes every day, so it also runs every week.
 name: rolling
 
 on:
@@ -57,7 +58,7 @@ jobs:
       - name: Build
         run: |
           source /opt/ros/$ROS_DISTRO/setup.bash
-          colcon build --event-handlers console_cohesion+
+          colcon build --event-handlers console_cohesion+ --cmake-args -DCMAKE_BUILD_TYPE=Release
 
       - name: Unit tests
         run: |
@@ -93,6 +94,34 @@ jobs:
           timeout 1200 ros2 run pilotaro_gazebo flight_check.py rov1 --takeoff-altitude -2.0 \
             --goal-time 15 --landing-time 80 --max-rotor-speed 157.7 \
             --expect-float -0.0732 --expect-ascent 0.0412
+          rc=$?
+          kill -INT $launch; wait $launch
+          exit $rc
+
+      - name: Failsafe test, x500
+        run: |
+          source install/setup.bash
+          mkdir -p log/sim
+          ros2 launch pilotaro_gazebo sim.launch.py headless:=true cameras:=false \
+            robots:=uav1:x500 > log/sim/failsafe.log 2>&1 &
+          launch=$!
+          set +e
+          timeout 600 bash -c 'until ros2 service list 2>/dev/null | grep /uav1/arming > /dev/null; do sleep 2; done'
+          timeout 900 ros2 run pilotaro_gazebo failsafe_check.py uav1
+          rc=$?
+          kill -INT $launch; wait $launch
+          exit $rc
+
+      - name: Mission test, x500
+        run: |
+          source install/setup.bash
+          mkdir -p log/sim
+          ros2 launch pilotaro_gazebo sim.launch.py headless:=true cameras:=false \
+            robots:=uav1:x500 > log/sim/mission.log 2>&1 &
+          launch=$!
+          set +e
+          timeout 600 bash -c 'until ros2 service list 2>/dev/null | grep /uav1/arming > /dev/null; do sleep 2; done'
+          timeout 900 ros2 run pilotaro_gazebo mission_check.py uav1
           rc=$?
           kill -INT $launch; wait $launch
           exit $rc

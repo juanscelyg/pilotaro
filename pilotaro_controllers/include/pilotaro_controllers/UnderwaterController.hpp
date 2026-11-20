@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "pilotaro_core/ControllerBase.hpp"
+#include "pilotaro_controllers/Shaping.hpp"
 
 namespace pilotaro_controllers
 {
@@ -47,6 +48,9 @@ struct UnderwaterGains
   Eigen::Vector3d linear_damping{0.0, 0.0, 0.0};        ///< Surge, sway, heave [N s/m]
   Eigen::Vector3d quadratic_damping{0.0, 0.0, 0.0};     ///< Surge, sway, heave [N s^2/m^2]
   double net_buoyancy{0.0};                             ///< Buoyancy - weight [N], + floats
+  double position_cutoff{5.0};       ///< Low-pass of the measured position [Hz], 0 = none
+  double velocity_cutoff{10.0};      ///< Low-pass of the measured velocity [Hz], 0 = none
+  double angular_rate_cutoff{30.0};  ///< Low-pass of the measured angular velocity [Hz]
 };
 
 /**
@@ -64,9 +68,14 @@ struct UnderwaterGains
  * thruster saturates, all the thrusts are scaled down together, so the direction of the
  * wrench is kept.
  *
+ * The measured position, velocity and angular velocity are low-pass filtered
+ * (position_cutoff, velocity_cutoff, angular_rate_cutoff) and a 3D position setpoint is approached along the straight line
+ * (position_to_velocity), as in CascadeController.
+ *
  * Parameters (prefix "controller."): position_p, velocity_p, velocity_i, velocity_i_max,
  * attitude_p, angular_rate_p, added_mass, added_inertia, linear_damping, quadratic_damping
- * (3 element vectors), max_horizontal_speed, max_vertical_speed, net_buoyancy.
+ * (3 element vectors), max_horizontal_speed, max_vertical_speed, net_buoyancy,
+ * position_cutoff, velocity_cutoff, angular_rate_cutoff.
  */
 class UnderwaterController : public pilotaro::ControllerBase
 {
@@ -124,6 +133,9 @@ private:
   Eigen::MatrixXd allocation_pinv_;       ///< Controlled part of the wrench -> thrusts (N x 6)
   std::array<bool, 6> controllable_{};       ///< DOF the thrusters can produce
   Eigen::Vector3d velocity_integral_{Eigen::Vector3d::Zero()};  ///< Velocity integral [m/s^2]
+  LowPass3 position_filter_;       ///< Measured position
+  LowPass3 velocity_filter_;       ///< Measured velocity
+  LowPass3 rate_filter_;       ///< Measured angular velocity
 };
 
 }  // namespace pilotaro_controllers

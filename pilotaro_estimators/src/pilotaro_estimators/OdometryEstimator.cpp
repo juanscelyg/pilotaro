@@ -12,6 +12,7 @@
 //  See the License for the specific language governing permissions and
 //  limitations under the License.
 
+#include <cmath>
 #include <string>
 
 #include "pluginlib/class_list_macros.hpp"
@@ -105,6 +106,9 @@ OdometryEstimator::to_vehicle_state(
     state.angular_velocity = state.orientation.conjugate() * angular;
   }
   state.stamp = rclcpp::Time(msg.header.stamp).seconds();
+  // Horizontal 1 sigma from the pose covariance (0 if the source does not report it)
+  const double var_xy = msg.pose.covariance[0] + msg.pose.covariance[7];
+  state.position_std = var_xy > 0.0 ? std::sqrt(var_xy) : 0.0;
 }
 
 }  // namespace pilotaro_estimators

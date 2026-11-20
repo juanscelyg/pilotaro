@@ -51,6 +51,9 @@ UnderwaterController::on_initialize()
   g.linear_damping = declare_vector3("linear_damping", g.linear_damping);
   g.quadratic_damping = declare_vector3("quadratic_damping", g.quadratic_damping);
   g.net_buoyancy = declare_parameter("net_buoyancy", g.net_buoyancy);
+  g.position_cutoff = declare_parameter("position_cutoff", g.position_cutoff);
+  g.velocity_cutoff = declare_parameter("velocity_cutoff", g.velocity_cutoff);
+  g.angular_rate_cutoff = declare_parameter("angular_rate_cutoff", g.angular_rate_cutoff);
 
   std::string error;
   if (!configure(get_vehicle(), g, &error)) {
@@ -93,6 +96,9 @@ UnderwaterController::configure(
   }
   vehicle_ = vehicle;
   gains_ = gains;
+  position_filter_ = LowPass3(gains.position_cutoff);
+  velocity_filter_ = LowPass3(gains.velocity_cutoff);
+  rate_filter_ = LowPass3(gains.angular_rate_cutoff);
 
   // Column i: force and torque of a unit thrust of thruster i. The reaction torque of the
   // propeller is opposite to its spin (ccw: negative around the thrust axis).
@@ -147,6 +153,9 @@ void
 UnderwaterController::reset()
 {
   velocity_integral_.setZero();
+  position_filter_.reset();
+  velocity_filter_.reset();
+  rate_filter_.reset();
 }
 
 void
@@ -196,29 +205,29 @@ UnderwaterController::update(
   const Eigen::Vector3d e3 = Eigen::Vector3d::UnitZ();
   const Eigen::Matrix3d rotation = state.orientation.normalized().toRotationMatrix();
 
+  const Eigen::Vector3d position = position_filter_.update(state.position, dt);
+  const Eigen::Vector3d velocity = velocity_filter_.update(state.velocity, dt);
+  const Eigen::Vector3d w = rate_filter_.update(state.angular_velocity, dt);
+
   // Position -> velocity (world)
-  Eigen::Vector3d velocity_sp = setpoint.velocity;
-  const Eigen::Vector3d position_error = setpoint.position - state.position;
-  if (setpoint.xy_position) {
-    velocity_sp.head<2>() += gains_.position_p.head<2>().cwiseProduct(position_error.head<2>());
-  }
-  if (setpoint.z_position) {
-    velocity_sp.z() += gains_.position_p.z() * position_error.z();
-  }
-  const double horizontal_speed = velocity_sp.head<2>().norm();
-  if (horizontal_speed > gains_.max_horizontal_speed) {
-    velocity_sp.head<2>() *= gains_.max_horizontal_speed / horizontal_speed;
-  }
-  velocity_sp.z() = std::clamp(
-    velocity_sp.z(), -gains_.max_vertical_speed, gains_.max_vertical_speed);
+  Eigen::Vector3d velocity_sp = position_to_velocity(
+    setpoint, position, gains_.position_p, gains_.max_horizontal_speed,
+    gains_.max_vertical_speed);
 
   // Velocity -> acceleration (world)
-  const Eigen::Vector3d velocity_error = velocity_sp - state.velocity;
+  const Eigen::Vector3d velocity_error = velocity_sp - velocity;
   velocity_integral_ += gains_.velocity_i.cwiseProduct(velocity_error) * dt;
   velocity_integral_ = velocity_integral_.cwiseMax(-gains_.velocity_i_max)
     .cwiseMin(gains_.velocity_i_max);
-  const Eigen::Vector3d acceleration_sp =
-    gains_.velocity_p.cwiseProduct(velocity_error) + velocity_integral_;
+  Eigen::Vector3d acceleration_sp =
+    gains_.velocity_p.cwiseProduct(velocity_error) + velocity_integral_ + setpoint.acceleration;
+  if (!setpoint.xy_position && !setpoint.xy_velocity) {
+    // No horizontal control (the horizontal estimate is not valid): level, no horizontal
+    // thrust
+    acceleration_sp.head<2>().setZero();
+    velocity_integral_.head<2>().setZero();
+    velocity_sp.head<2>().setZero();       // no damping feed-forward either
+  }
 
   // Force (body): (mass + added mass) * acceleration + damping at the velocity setpoint
   // - net buoyancy
@@ -235,7 +244,6 @@ UnderwaterController::update(
     Eigen::AngleAxisd(setpoint.yaw, e3).toRotationMatrix();
   const Eigen::Vector3d attitude_error =
     0.5 * vee(rotation_sp.transpose() * rotation - rotation.transpose() * rotation_sp);
-  const Eigen::Vector3d & w = state.angular_velocity;
   const Eigen::Vector3d inertia = vehicle_.inertia + gains_.added_inertia;
   const Eigen::Vector3d torque = inertia.cwiseProduct(
     -gains_.attitude_p.cwiseProduct(attitude_error) - gains_.angular_rate_p.cwiseProduct(w)) +

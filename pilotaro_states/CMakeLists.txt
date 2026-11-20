@@ -24,6 +24,8 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(pilotaro_common REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
@@ -39,6 +41,8 @@ target_link_libraries(${PROJECT_NAME} PUBLIC
   ${std_msgs_TARGETS}
   ${std_srvs_TARGETS}
   ${geometry_msgs_TARGETS}
+  ${sensor_msgs_TARGETS}
+  ${nav_msgs_TARGETS}
   pilotaro_common::pilotaro_common
 )
 
@@ -69,6 +73,8 @@ ament_export_dependencies(
   std_msgs
   std_srvs
   geometry_msgs
+  sensor_msgs
+  nav_msgs
   pilotaro_common
 )
 ament_package()

@@ -179,19 +179,20 @@
       <precision>${precision}</precision>
     </noise>
   </xacro:macro>
-  <xacro:macro name="pilotaro_gyro_noise">
-    <xacro:pilotaro_imu_noise stddev="0.009" bias_mean="0.00075" bias_stddev="0.005"
+  <xacro:macro name="pilotaro_gyro_noise" params="stddev:=0.009">
+    <xacro:pilotaro_imu_noise stddev="${stddev}" bias_mean="0.00075" bias_stddev="0.005"
                               dynamic_bias_stddev="0.00002" correlation_time="400.0"
                               precision="0.00025"/>
   </xacro:macro>
-  <xacro:macro name="pilotaro_accel_noise">
-    <xacro:pilotaro_imu_noise stddev="0.021" bias_mean="0.05" bias_stddev="0.0075"
+  <xacro:macro name="pilotaro_accel_noise" params="stddev:=0.021">
+    <xacro:pilotaro_imu_noise stddev="${stddev}" bias_mean="0.05" bias_stddev="0.0075"
                               dynamic_bias_stddev="0.000375" correlation_time="175.0"
                               precision="0.005"/>
   </xacro:macro>
 
-  <!-- IMU at the origin of base_link: /<robot>/imu -->
-  <xacro:macro name="pilotaro_imu" params="robot rate:=250">
+  <!-- IMU at the origin of base_link: /<robot>/imu. gyro_stddev [rad/s] and accel_stddev
+       [m/s^2]: white noise per sample (the biases are the same for every vehicle) -->
+  <xacro:macro name="pilotaro_imu" params="robot rate:=250 gyro_stddev:=0.009 accel_stddev:=0.021">
     <link name="imu_link"/>
     <joint name="imu_joint" type="fixed">
       <parent link="base_link"/>
@@ -207,14 +208,14 @@
         <imu>
           <enable_orientation>0</enable_orientation>
           <angular_velocity>
-            <x><xacro:pilotaro_gyro_noise/></x>
-            <y><xacro:pilotaro_gyro_noise/></y>
-            <z><xacro:pilotaro_gyro_noise/></z>
+            <x><xacro:pilotaro_gyro_noise stddev="${gyro_stddev}"/></x>
+            <y><xacro:pilotaro_gyro_noise stddev="${gyro_stddev}"/></y>
+            <z><xacro:pilotaro_gyro_noise stddev="${gyro_stddev}"/></z>
           </angular_velocity>
           <linear_acceleration>
-            <x><xacro:pilotaro_accel_noise/></x>
-            <y><xacro:pilotaro_accel_noise/></y>
-            <z><xacro:pilotaro_accel_noise/></z>
+            <x><xacro:pilotaro_accel_noise stddev="${accel_stddev}"/></x>
+            <y><xacro:pilotaro_accel_noise stddev="${accel_stddev}"/></y>
+            <z><xacro:pilotaro_accel_noise stddev="${accel_stddev}"/></z>
           </linear_acceleration>
         </imu>
       </sensor>

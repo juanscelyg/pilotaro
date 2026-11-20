@@ -36,6 +36,8 @@ enum class FlightMode
   LOITER,         ///< Holding position
   LANDING,        ///< Descending until touchdown, then disarm
   OFFBOARD,       ///< Following external setpoints
+  MISSION,        ///< Flying a list of waypoints
+  RTL,            ///< Returning to the arming point (launch), then landing
 };
 
 /**
@@ -48,7 +50,7 @@ std::string to_string(FlightMode mode);
 /**
  * @brief Whether the vehicle is in the air or about to leave the ground in this mode
  * @param mode flight mode
- * @return true for TAKEOFF, LOITER, LANDING and OFFBOARD
+ * @return true for TAKEOFF, LOITER, LANDING, OFFBOARD, MISSION and RTL
  */
 bool is_flying(FlightMode mode);
 
@@ -64,6 +66,8 @@ struct VehicleState
   Eigen::Quaterniond orientation{Eigen::Quaterniond::Identity()};
   Eigen::Vector3d angular_velocity{Eigen::Vector3d::Zero()};
   double stamp{0.0};       ///< Time of the estimate [s], clock of the estimator
+  /// Horizontal position uncertainty (1 sigma) [m]; 0 = not reported (taken as exact)
+  double position_std{0.0};
 };
 
 /**
@@ -77,8 +81,19 @@ struct ControlSetpoint
 {
   bool xy_position{true};       ///< Track horizontal position (true) or horizontal velocity (false)
   bool z_position{true};        ///< Track altitude (true) or vertical velocity (false)
+  /// With xy_position false: track the horizontal velocity (true) or do not control the
+  /// horizontal motion at all (false: level attitude, no horizontal thrust), for when the
+  /// horizontal estimate is not valid
+  bool xy_velocity{true};
+  /// Cap of the commanded speed (norm of the velocity setpoint) [m/s], below the limits of
+  /// the controller; 0 = only those limits. Missions use it so that catching up after a lag
+  /// never goes faster than the mission speed
+  double max_speed{0.0};
   Eigen::Vector3d position{Eigen::Vector3d::Zero()};
   Eigen::Vector3d velocity{Eigen::Vector3d::Zero()};
+  /// Acceleration feed-forward of a trajectory (world) [m/s^2], added to the output of the
+  /// velocity loop
+  Eigen::Vector3d acceleration{Eigen::Vector3d::Zero()};
   double yaw{0.0};              ///< Heading [rad], ENU (0 = east, CCW positive)
 };
 

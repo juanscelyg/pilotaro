@@ -29,6 +29,8 @@ std::string to_string(FlightMode mode)
     case FlightMode::LOITER: return "LOITER";
     case FlightMode::LANDING: return "LANDING";
     case FlightMode::OFFBOARD: return "OFFBOARD";
+    case FlightMode::MISSION: return "MISSION";
+    case FlightMode::RTL: return "RTL";
   }
   return "UNKNOWN";
 }
@@ -36,7 +38,8 @@ std::string to_string(FlightMode mode)
 bool is_flying(FlightMode mode)
 {
   return mode == FlightMode::TAKEOFF || mode == FlightMode::LOITER ||
-         mode == FlightMode::LANDING || mode == FlightMode::OFFBOARD;
+         mode == FlightMode::LANDING || mode == FlightMode::OFFBOARD ||
+         mode == FlightMode::MISSION || mode == FlightMode::RTL;
 }
 
 std::string

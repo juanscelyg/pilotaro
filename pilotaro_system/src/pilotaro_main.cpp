@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <memory>
 #include <string>
 
 #include "lifecycle_msgs/msg/state.hpp"
@@ -132,7 +133,19 @@ int main(int argc, char * argv[])
   // One thread does everything: take the incoming messages and service calls, then run
   // estimator -> states -> controllers -> actuators on them
   const auto period = std::chrono::duration<double>(1.0 / frequency);
-  rclcpp::WallRate rate(frequency);
+  // In simulation (use_sim_time) the loop follows the simulation clock (/clock, taken by the
+  // clock thread of the node), so it keeps 250 Hz of simulated time whatever the real time
+  // factor; on a robot it follows the wall clock
+  const bool sim_time = pilotaro_node->get_parameter("use_sim_time").as_bool();
+  std::unique_ptr<rclcpp::Rate> rate;
+  if (sim_time) {
+    rate = std::make_unique<rclcpp::Rate>(frequency, pilotaro_node->get_clock());
+  } else {
+    rate = std::make_unique<rclcpp::WallRate>(frequency);
+  }
+  RCLCPP_INFO(
+    pilotaro_node->get_logger(), "Main loop at %.0f Hz of %s time", frequency,
+    sim_time ? "simulation" : "wall");
   auto last_report = std::chrono::steady_clock::now();
   uint64_t overruns = 0, cycles = 0;
   while (working.load(std::memory_order_relaxed)) {
@@ -161,7 +174,7 @@ int main(int argc, char * argv[])
       cycles = 0;
       last_report = end;
     }
-    rate.sleep();
+    rate->sleep();
   }
 
   working.store(false, std::memory_order_relaxed);

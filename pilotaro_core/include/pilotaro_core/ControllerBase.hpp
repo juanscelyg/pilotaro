@@ -27,7 +27,7 @@ namespace pilotaro
  * @class ControllerBase
  * @brief Interface of the controller plugins, loaded by ControllersNode.
  *
- * Called only while flying (TAKEOFF, LOITER, LANDING, OFFBOARD) and once per new state
+ * Called only while flying (TAKEOFF, LOITER, LANDING, OFFBOARD, MISSION, RTL) and once per new state
  * estimate. reset() is called when the vehicle starts flying from the ground.
  */
 class ControllerBase : public PluginBase

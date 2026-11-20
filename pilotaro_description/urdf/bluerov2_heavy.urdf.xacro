@@ -140,7 +140,8 @@
 
   <!-- ============================== Sensors ============================== -->
 
-  <xacro:pilotaro_imu robot="${name}" rate="250"/>
+  <!-- white noise of the PX4 BlueROV2 Heavy model (uuv_bluerov2_heavy) -->
+  <xacro:pilotaro_imu robot="${name}" rate="250" gyro_stddev="0.00018665" accel_stddev="0.00186"/>
   <xacro:pilotaro_magnetometer robot="${name}" rate="50"/>
 
   <!-- Blue Robotics Ping echosounder looking down: distance to the bottom, 0.3 to 30 m -->

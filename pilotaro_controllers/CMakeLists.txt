@@ -76,6 +76,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_cascade_controller ${PROJECT_NAME} ${PROJECT_NAME}_plugins)
   ament_add_gtest(test_underwater_controller test/test_underwater_controller.cpp)
   target_link_libraries(test_underwater_controller ${PROJECT_NAME}_plugins)
+  ament_add_gtest(test_shaping test/test_shaping.cpp)
+  target_link_libraries(test_shaping ${PROJECT_NAME}_plugins)
 endif()
 
 ament_export_include_directories("include/${PROJECT_NAME}")

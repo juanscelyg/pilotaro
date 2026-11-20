@@ -17,11 +17,16 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
+#include "nav_msgs/msg/path.hpp"
 #include "rclcpp/macros.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/battery_state.hpp"
+#include "std_msgs/msg/empty.hpp"
+#include "std_msgs/msg/int32.hpp"
 #include "std_msgs/msg/string.hpp"
 #include "std_srvs/srv/trigger.hpp"
 
@@ -99,11 +104,34 @@ private:
    */
   void on_mode_change(FlightMode from, FlightMode to, const std::string & reason);
 
+  void on_failsafe_change(const std::vector<std::string> & active, FailsafeAction action);
+
+  /// Read the failsafe.* parameters (also on a change); false if one is invalid
+  bool read_failsafe_params(FailsafeParams & f, std::string & error);
+
+  /// Read the mission.* parameters (also on a change); false if one is invalid
+  bool read_mission_params(MissionParams & m, std::string & error);
+
+  void mission_callback(nav_msgs::msg::Path::ConstSharedPtr msg);
+
+  rcl_interfaces::msg::SetParametersResult on_parameters(
+    const std::vector<rclcpp::Parameter> & parameters);
+
   FlightModeMachine machine_;       ///< Flight modes
   std::shared_ptr<RobotState> robot_state_;       ///< Set by init()
   std::string offboard_frame_id_;       ///< Expected frame of offboard/pose, empty accepts any
 
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr mode_pub_;
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr failsafe_pub_;
+  rclcpp::Publisher<std_msgs::msg::Int32>::SharedPtr mission_current_pub_;
+  rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr mission_sub_;
+  rclcpp::Service<Trigger>::SharedPtr mission_srv_;
+  rclcpp::Service<Trigger>::SharedPtr rtl_srv_;
+  int mission_current_{-2};       ///< Last published waypoint index
+  rclcpp::Subscription<sensor_msgs::msg::BatteryState>::SharedPtr battery_sub_;
+  rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr heartbeat_sub_;
+  OnSetParametersCallbackHandle::SharedPtr param_cb_;       ///< Validates failsafe.*
+  PostSetParametersCallbackHandle::SharedPtr post_param_cb_;       ///< Applies failsafe.*
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sp_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr twist_sp_sub_;
   rclcpp::Service<Trigger>::SharedPtr arming_srv_;

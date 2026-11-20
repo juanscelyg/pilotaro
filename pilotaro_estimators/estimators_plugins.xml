@@ -9,4 +9,10 @@
       external estimator).
     </description>
   </class>
+  <class name="pilotaro_estimators/InsEkfEstimator" type="pilotaro_estimators::InsEkfEstimator" base_class_type="pilotaro::StateEstimatorBase">
+    <description>
+      Inertial navigation: error-state EKF driven by the IMU, corrected with GNSS, barometer,
+      magnetometer and optionally an external odometry.
+    </description>
+  </class>
 </library>

@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -30,6 +31,28 @@ Eigen::Vector3d vee(const Eigen::Matrix3d & m)
 {
   return {m(2, 1), m(0, 2), m(1, 0)};
 }
+
+/// Collective shift d (thrusts + d * collective) closest to 0 keeping every rotor in
+/// [low, high]; false if there is none (then the shift is the least bad compromise)
+bool fit_collective(
+  const Eigen::VectorXd & thrusts, const Eigen::VectorXd & collective, double low, double high,
+  double & shift)
+{
+  double lo = -std::numeric_limits<double>::infinity();
+  double hi = std::numeric_limits<double>::infinity();
+  for (Eigen::Index i = 0; i < thrusts.size(); ++i) {
+    if (collective[i] > 1e-9) {
+      lo = std::max(lo, (low - thrusts[i]) / collective[i]);
+      hi = std::min(hi, (high - thrusts[i]) / collective[i]);
+    }
+  }
+  if (lo > hi) {
+    shift = 0.5 * (lo + hi);
+    return false;
+  }
+  shift = std::clamp(0.0, lo, hi);
+  return true;
+}
 }  // namespace
 
 bool
@@ -45,6 +68,10 @@ CascadeController::on_initialize()
   g.max_horizontal_speed = declare_parameter("max_horizontal_speed", g.max_horizontal_speed);
   g.max_vertical_speed = declare_parameter("max_vertical_speed", g.max_vertical_speed);
   g.max_tilt = declare_parameter("max_tilt", g.max_tilt);
+  g.max_yaw_rate = declare_parameter("max_yaw_rate", g.max_yaw_rate);
+  g.position_cutoff = declare_parameter("position_cutoff", g.position_cutoff);
+  g.velocity_cutoff = declare_parameter("velocity_cutoff", g.velocity_cutoff);
+  g.angular_rate_cutoff = declare_parameter("angular_rate_cutoff", g.angular_rate_cutoff);
 
   std::string error;
   if (!configure(get_vehicle(), g, &error)) {
@@ -80,8 +107,14 @@ CascadeController::configure(
   {
     return set_error("max speeds must be positive and 0 < max_tilt < pi/2");
   }
+  if (gains.max_yaw_rate < 0.0 || (gains.max_yaw_rate > 0.0 && gains.angular_rate_p.z() <= 0.0)) {
+    return set_error("max_yaw_rate must be >= 0 and needs a positive yaw angular_rate_p");
+  }
   vehicle_ = vehicle;
   gains_ = gains;
+  position_filter_ = LowPass3(gains.position_cutoff);
+  velocity_filter_ = LowPass3(gains.velocity_cutoff);
+  rate_filter_ = LowPass3(gains.angular_rate_cutoff);
 
   // Rows: thrust, roll torque, pitch torque, yaw torque produced by each rotor thrust.
   // A ccw rotor reacts on the body with a negative yaw torque.
@@ -98,7 +131,6 @@ CascadeController::configure(
     return set_error("the rotor geometry gives a singular allocation matrix");
   }
   allocation_pinv_ = cod.pseudoInverse();
-  thrusts_ = Eigen::VectorXd::Zero(n);
   reset();
   return true;
 }
@@ -107,18 +139,58 @@ void
 CascadeController::reset()
 {
   velocity_integral_.setZero();
+  position_filter_.reset();
+  velocity_filter_.reset();
+  rate_filter_.reset();
 }
 
 void
 CascadeController::allocate(
   const Eigen::Vector4d & wrench, std::vector<double> & rotor_speeds) const
 {
+  const auto n = static_cast<Eigen::Index>(vehicle_.rotor_count());
   rotor_speeds.resize(vehicle_.rotor_count());
-  const Eigen::VectorXd thrusts = allocation_pinv_ * wrench;
-  for (std::size_t i = 0; i < rotor_speeds.size(); ++i) {
-    const double w = std::sqrt(
-      std::max(thrusts[static_cast<Eigen::Index>(i)], 0.0) / vehicle_.motor_constant);
-    rotor_speeds[i] = std::clamp(w, vehicle_.min_rot_velocity, vehicle_.max_rot_velocity);
+  const double low = vehicle_.motor_constant * vehicle_.min_rot_velocity *
+    vehicle_.min_rot_velocity;
+  const double high = vehicle_.motor_constant * vehicle_.max_rot_velocity *
+    vehicle_.max_rot_velocity;
+  const Eigen::VectorXd collective = allocation_pinv_.col(0);
+  const Eigen::VectorXd base = collective * wrench[0];
+  const Eigen::VectorXd tilt = allocation_pinv_.middleCols(1, 2) * wrench.segment<2>(1);
+  const Eigen::VectorXd yaw = allocation_pinv_.col(3) * wrench[3];
+
+  // 1. Roll and pitch, moving the collective thrust if needed; scaled down only if the
+  // difference between rotors does not fit in the range
+  double shift = 0.0;
+  double tilt_scale = 1.0;
+  if (!fit_collective(base + tilt, collective, low, high, shift)) {
+    double fits = 0.0;
+    double fails = 1.0;
+    for (int i = 0; i < 20; ++i) {
+      const double mid = 0.5 * (fits + fails);
+      double s = 0.0;
+      (fit_collective(base + mid * tilt, collective, low, high, s) ? fits : fails) = mid;
+    }
+    tilt_scale = fits;
+    fit_collective(base + tilt_scale * tilt, collective, low, high, shift);
+  }
+  Eigen::VectorXd thrusts = base + tilt_scale * tilt + shift * collective;
+
+  // 2. Yaw: the largest fraction of the torque that keeps every rotor in range
+  double yaw_scale = 1.0;
+  for (Eigen::Index i = 0; i < n; ++i) {
+    if (yaw[i] > 1e-12) {
+      yaw_scale = std::min(yaw_scale, (high - thrusts[i]) / yaw[i]);
+    } else if (yaw[i] < -1e-12) {
+      yaw_scale = std::min(yaw_scale, (low - thrusts[i]) / yaw[i]);
+    }
+  }
+  thrusts += std::clamp(yaw_scale, 0.0, 1.0) * yaw;
+
+  for (Eigen::Index i = 0; i < n; ++i) {
+    const double w = std::sqrt(std::max(thrusts[i], 0.0) / vehicle_.motor_constant);
+    rotor_speeds[static_cast<std::size_t>(i)] =
+      std::clamp(w, vehicle_.min_rot_velocity, vehicle_.max_rot_velocity);
   }
 }
 
@@ -132,29 +204,28 @@ CascadeController::update(
   }
   const Eigen::Vector3d e3 = Eigen::Vector3d::UnitZ();
 
+  const Eigen::Vector3d position = position_filter_.update(state.position, dt);
+  const Eigen::Vector3d velocity = velocity_filter_.update(state.velocity, dt);
+  const Eigen::Vector3d w = rate_filter_.update(state.angular_velocity, dt);
+
   // Position -> velocity
-  Eigen::Vector3d velocity_sp = setpoint.velocity;
-  const Eigen::Vector3d position_error = setpoint.position - state.position;
-  if (setpoint.xy_position) {
-    velocity_sp.head<2>() += gains_.position_p.head<2>().cwiseProduct(position_error.head<2>());
-  }
-  if (setpoint.z_position) {
-    velocity_sp.z() += gains_.position_p.z() * position_error.z();
-  }
-  const double horizontal_speed = velocity_sp.head<2>().norm();
-  if (horizontal_speed > gains_.max_horizontal_speed) {
-    velocity_sp.head<2>() *= gains_.max_horizontal_speed / horizontal_speed;
-  }
-  velocity_sp.z() = std::clamp(
-    velocity_sp.z(), -gains_.max_vertical_speed, gains_.max_vertical_speed);
+  const Eigen::Vector3d velocity_sp = position_to_velocity(
+    setpoint, position, gains_.position_p, gains_.max_horizontal_speed,
+    gains_.max_vertical_speed);
 
   // Velocity -> acceleration
-  const Eigen::Vector3d velocity_error = velocity_sp - state.velocity;
+  const Eigen::Vector3d velocity_error = velocity_sp - velocity;
   velocity_integral_ += gains_.velocity_i.cwiseProduct(velocity_error) * dt;
   velocity_integral_ = velocity_integral_.cwiseMax(-gains_.velocity_i_max)
     .cwiseMin(gains_.velocity_i_max);
-  const Eigen::Vector3d acceleration_sp =
-    gains_.velocity_p.cwiseProduct(velocity_error) + velocity_integral_;
+  Eigen::Vector3d acceleration_sp =
+    gains_.velocity_p.cwiseProduct(velocity_error) + velocity_integral_ + setpoint.acceleration;
+  if (!setpoint.xy_position && !setpoint.xy_velocity) {
+    // No horizontal control (the horizontal estimate is not valid): level, no horizontal
+    // thrust
+    acceleration_sp.head<2>().setZero();
+    velocity_integral_.head<2>().setZero();
+  }
 
   // Acceleration -> thrust vector, limiting the tilt
   Eigen::Vector3d force = vehicle_.mass * (acceleration_sp + vehicle_.gravity * e3);
@@ -178,10 +249,17 @@ CascadeController::update(
   // Attitude error on SO(3) -> body torques
   const Eigen::Vector3d attitude_error =
     0.5 * vee(rotation_sp.transpose() * rotation - rotation.transpose() * rotation_sp);
-  const Eigen::Vector3d & w = state.angular_velocity;
+  Eigen::Vector3d angular_acceleration =
+    -gains_.attitude_p.cwiseProduct(attitude_error) - gains_.angular_rate_p.cwiseProduct(w);
+  if (gains_.max_yaw_rate > 0.0) {
+    // Same law written as P -> yaw rate -> torque, with the yaw rate limited
+    const double yaw_rate_sp = std::clamp(
+      -gains_.attitude_p.z() / gains_.angular_rate_p.z() * attitude_error.z(),
+      -gains_.max_yaw_rate, gains_.max_yaw_rate);
+    angular_acceleration.z() = gains_.angular_rate_p.z() * (yaw_rate_sp - w.z());
+  }
   const Eigen::Vector3d inertia_w = vehicle_.inertia.cwiseProduct(w);
-  const Eigen::Vector3d torque = vehicle_.inertia.cwiseProduct(
-    -gains_.attitude_p.cwiseProduct(attitude_error) - gains_.angular_rate_p.cwiseProduct(w)) +
+  const Eigen::Vector3d torque = vehicle_.inertia.cwiseProduct(angular_acceleration) +
     w.cross(inertia_w);
 
   Eigen::Vector4d wrench;

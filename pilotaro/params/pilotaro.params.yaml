@@ -50,6 +50,8 @@
   ros__parameters:
     takeoff_altitude: 2.0         # [m] over the arming point
     takeoff_speed: 0.8            # [m/s]
+    takeoff_acceleration: 0.5     # [m/s^2] speed up and brake the takeoff setpoint, 0 = none
+    takeoff_max_lead: 0.3         # [m] the setpoint may not lead the vehicle more, 0 = none
     landing_speed: 0.5            # [m/s]
     land_detect_altitude: 0.5     # [m] over the arming point
     land_detect_speed: 0.1        # [m/s]
@@ -57,6 +59,43 @@
     offboard_timeout: 0.5         # [s] max age of offboard/pose or offboard/twist
     estimate_timeout: 0.5         # [s] disarm if there are no estimates while armed
     offboard_frame_id: ""         # if set, offboard/pose in another frame is ignored
+    failsafe:
+      # Each failsafe: condition (0 disables it) and action: none, warn, loiter, land or
+      # disarm (a positively buoyant underwater vehicle surfaces). The strongest active
+      # action applies; they can be changed in flight (ros2 param set)
+      battery_min_arm: 0.3        # charge 0-1 to arm (battery topic, sensor_msgs/BatteryState)
+      battery_low: 0.2
+      battery_low_action: "warn"
+      battery_critical: 0.1
+      battery_critical_action: "land"
+      battery_timeout: 2.0        # [s] battery reports stop: warning
+      geofence_radius: 0.0        # [m] around the arming point
+      geofence_max_height: 0.0    # [m] over the arming point
+      geofence_max_depth: 0.0     # [m] under the arming point
+      geofence_margin: 0.3        # [m] beyond the fence before the failsafe (tracking error)
+      geofence_action: "loiter"   # holds inside; offboard goals are clamped to the fence
+      max_position_std: 1.0       # [m] horizontal uncertainty of the estimate
+      position_action: "land"
+      heartbeat_timeout: 0.0      # [s] ground station link (heartbeat topic, std_msgs/Empty)
+      heartbeat_action: "loiter"
+      max_tilt: 1.2               # [rad] attitude failure (flip, lost motor)...
+      max_tilt_time: 0.3          # [s] ...for this long
+      attitude_action: "disarm"
+      max_tilt_arming: 0.35       # [rad] pre-arm check
+      max_rate_arming: 0.3        # [rad/s] pre-arm check
+    mission:
+      # Waypoints on the mission topic (nav_msgs/Path, world frame); mission and rtl services
+      speed: 2.0                  # [m/s] along each leg, in a straight line
+      acceleration: 1.0           # [m/s^2] speed up and brake
+      acceptance_radius: 0.3      # [m] a waypoint is reached closer than this...
+      acceptance_speed: 0.5       # [m/s] ...and slower than this, 0 = any speed
+      hold_time: 0.0              # [s] at each waypoint
+      max_lead: 1.0               # [m] the setpoint may not lead the vehicle more, 0 = none
+      end_action: "loiter"        # after the last waypoint: loiter, rtl or land
+      rtl_altitude: 5.0           # [m] RTL climbs first to this height over the arming
+                                  # point if lower (never descends); 0 = current height
+      rtl_speed: 2.0              # [m/s]
+      rtl_final_action: "land"    # over the arming point: land, disarm or loiter
 
 /**/controllers_node:
   ros__parameters:
@@ -75,6 +114,10 @@
       max_horizontal_speed: 3.0   # [m/s]
       max_vertical_speed: 1.5     # [m/s]
       max_tilt: 0.6               # [rad]
+      max_yaw_rate: 1.0           # [rad/s] yaw rate commanded by the yaw error, 0 = none
+      position_cutoff: 0.0        # [Hz] low-pass of the measured position, 0 = none
+      velocity_cutoff: 10.0       # [Hz] low-pass of the measured velocity, 0 = none
+      angular_rate_cutoff: 10.0   # [Hz] low-pass of the measured angular velocity, 0 = none
 
 /**/actuators_node:
   ros__parameters:

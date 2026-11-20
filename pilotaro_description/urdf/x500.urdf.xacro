@@ -158,7 +158,8 @@
 
   <!-- ============================== Sensors ============================== -->
 
-  <xacro:pilotaro_imu robot="${name}" rate="250"/>
+  <!-- white noise of the PX4 x500 model (Tools/simulation/gz/models/x500_base) -->
+  <xacro:pilotaro_imu robot="${name}" rate="250" gyro_stddev="0.0008726646" accel_stddev="0.00637"/>
   <xacro:pilotaro_air_pressure robot="${name}" rate="50"/>
   <xacro:pilotaro_magnetometer robot="${name}" rate="50"/>
   <xacro:pilotaro_navsat robot="${name}" rate="10"/>

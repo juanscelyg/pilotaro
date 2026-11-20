@@ -24,6 +24,8 @@ install(
 
 install(PROGRAMS
   scripts/flight_check.py
+  scripts/failsafe_check.py
+  scripts/mission_check.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
