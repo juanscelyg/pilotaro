@@ -71,6 +71,8 @@ jobs:
         run: |
           source install/setup.bash
           mkdir -p log/sim
+          # own Gazebo partition and ROS domain: nothing left by another step can interfere
+          export GZ_PARTITION=ci_multirotor ROS_DOMAIN_ID=11
           ros2 launch pilotaro_gazebo sim.launch.py headless:=true cameras:=false \
             robots:=big:x500,small:bebop2 spacing:=3.0 > log/sim/multirotor.log 2>&1 &
           launch=$!
@@ -80,12 +82,15 @@ jobs:
           timeout 900 ros2 run pilotaro_gazebo flight_check.py big small
           rc=$?
           kill -INT $launch; wait $launch
+          pkill -9 -f '[g]z-sim-main' || true
           exit $rc
 
       - name: Flight test, BlueROV2 Heavy underwater
         run: |
           source install/setup.bash
           mkdir -p log/sim
+          # own Gazebo partition and ROS domain: nothing left by another step can interfere
+          export GZ_PARTITION=ci_underwater ROS_DOMAIN_ID=12
           ros2 launch pilotaro_gazebo sim.launch.py headless:=true cameras:=false \
             world:=underwater robots:=rov1:bluerov2_heavy > log/sim/underwater.log 2>&1 &
           launch=$!
@@ -96,12 +101,15 @@ jobs:
             --expect-float -0.0732 --expect-ascent 0.0412
           rc=$?
           kill -INT $launch; wait $launch
+          pkill -9 -f '[g]z-sim-main' || true
           exit $rc
 
       - name: Failsafe test, x500
         run: |
           source install/setup.bash
           mkdir -p log/sim
+          # own Gazebo partition and ROS domain: nothing left by another step can interfere
+          export GZ_PARTITION=ci_failsafe ROS_DOMAIN_ID=13
           ros2 launch pilotaro_gazebo sim.launch.py headless:=true cameras:=false \
             robots:=uav1:x500 > log/sim/failsafe.log 2>&1 &
           launch=$!
@@ -110,12 +118,15 @@ jobs:
           timeout 900 ros2 run pilotaro_gazebo failsafe_check.py uav1
           rc=$?
           kill -INT $launch; wait $launch
+          pkill -9 -f '[g]z-sim-main' || true
           exit $rc
 
       - name: Mission test, x500
         run: |
           source install/setup.bash
           mkdir -p log/sim
+          # own Gazebo partition and ROS domain: nothing left by another step can interfere
+          export GZ_PARTITION=ci_mission ROS_DOMAIN_ID=14
           ros2 launch pilotaro_gazebo sim.launch.py headless:=true cameras:=false \
             robots:=uav1:x500 > log/sim/mission.log 2>&1 &
           launch=$!
@@ -124,6 +135,7 @@ jobs:
           timeout 900 ros2 run pilotaro_gazebo mission_check.py uav1
           rc=$?
           kill -INT $launch; wait $launch
+          pkill -9 -f '[g]z-sim-main' || true
           exit $rc
 
       - name: Upload logs

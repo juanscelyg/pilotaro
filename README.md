@@ -776,8 +776,9 @@ container, without a GPU, it:
 6. flies a waypoint mission with an x500 and returns to launch with `mission_check.py`;
 7. injects failures into an x500 with `failsafe_check.py`.
 
-Any failed check fails the run, and the colcon and simulation logs are uploaded as the
-`logs` artifact. The same steps can be reproduced locally:
+Each simulation step uses its own Gazebo partition and ROS domain and removes any Gazebo
+server left at the end, so a step cannot interfere with the next one. Any failed check
+fails the run, and the colcon and simulation logs are uploaded as the `logs` artifact. The same steps can be reproduced locally:
 
 ```bash
 docker run --rm -it -v $PWD:/ws/src/pilotaro -w /ws ros:rolling bash

@@ -20,15 +20,46 @@ argument), e.g. robots:=uav1,uav2 or robots:=big:x500,small:bebop2. Robot i is s
 (x + i * spacing, y). Other robots can be added later with spawn.launch.py.
 """
 
+import importlib.util
+from os import environ, pathsep
 from os.path import basename, join, splitext
+import shlex
+import shutil
 
 from ament_index_python.packages import get_package_share_directory
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription
+from launch.actions import OpaqueFunction, Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
+
+
+def gazebo_server(gz_args):
+    """Gazebo server as ros_gz_sim gz_sim.launch.py starts it, but without a shell.
+
+    That launch runs 'sh -c "ruby gz sim ..."' and ruby replaces itself by the server: the
+    SIGINT of the shutdown reaches only the shell, and the server (gz-sim-main) was left
+    running, so the next simulation in the same partition found it (two servers of the
+    same world).
+    """
+    spec = importlib.util.spec_from_file_location(
+        'ros_gz_sim_gz_sim_launch',
+        join(get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    model_paths, plugin_paths = module.GazeboRosPaths.get_paths()
+    env = {
+        'GZ_SIM_SYSTEM_PLUGIN_PATH': pathsep.join([
+            environ.get('GZ_SIM_SYSTEM_PLUGIN_PATH', ''), environ.get('LD_LIBRARY_PATH', ''),
+            plugin_paths]),
+        'GZ_SIM_RESOURCE_PATH': pathsep.join([
+            environ.get('GZ_SIM_RESOURCE_PATH', ''), model_paths]),
+    }
+    return ExecuteProcess(
+        cmd=['ruby', shutil.which('gz'), 'sim', *shlex.split(gz_args), '--force-version', '11'],
+        name='gazebo', output='screen', additional_env=env, on_exit=Shutdown())
 
 def launch_sim(context):
     pkg = get_package_share_directory('pilotaro_gazebo')
@@ -42,10 +73,7 @@ def launch_sim(context):
     headless = LaunchConfiguration('headless').perform(context).lower() == 'true'
     gz_args = '-r ' + ('-s --headless-rendering ' if headless else '') + world
 
-    actions = [IncludeLaunchDescription(
-        join(get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py'),
-        launch_arguments={'gz_args': gz_args, 'on_exit_shutdown': 'true'}.items(),
-    )]
+    actions = [gazebo_server(gz_args)]
 
     # One clock bridge for the whole simulation
     actions.append(Node(
